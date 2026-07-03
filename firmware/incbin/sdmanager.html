@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>SD Card Manager</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="sdmanager.js" defer></script>
+  <style>
+    html {
+      font-size: 18px;
+    }
+    body {
+      font-family: Arial, sans-serif;
+      margin: 2em;
+      background: #f9f9f9;
+      color: #222;
+    }
+    h1 {
+      font-size: 1.5em;
+      margin-top: 0;
+    }
+    .container {
+      max-width: 95vw;
+      width: 100%;
+      max-width: 40em;
+      margin: auto;
+      background: #fff;
+      padding: 2em 1em;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px #0001;
+    }
+    #breadcrumb {
+      margin-bottom: 1em;
+      font-size: 0.95em;
+      word-break: break-all;
+    }
+    #upButton {
+      margin-bottom: 1em;
+      padding: 0.4em 1em;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      background: #eee;
+      cursor: pointer;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 1.5em;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.4em 0.5em;
+      border-bottom: 1px solid #eee;
+      font-size: 0.95em;
+    }
+    td.name {
+      cursor: pointer;
+      color: #0077cc;
+    }
+    td.size {
+      text-align: right;
+      color: #666;
+    }
+    button.action {
+      padding: 0.2em 0.7em;
+      border-radius: 4px;
+      border: none;
+      background: #bb2222;
+      color: #fff;
+      cursor: pointer;
+      font-size: 0.85em;
+    }
+    a.download {
+      margin-right: 0.5em;
+    }
+    form#uploadForm {
+      display: flex;
+      gap: 0.5em;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 1em;
+    }
+    button {
+      padding: 0.5em 1.2em;
+      font-size: 1em;
+      border-radius: 6px;
+      border: none;
+      background: #0077cc;
+      color: #fff;
+      cursor: pointer;
+    }
+    #status {
+      margin-top: 1em;
+      color: #007700;
+    }
+    #error {
+      margin-top: 1em;
+      color: #bb2222;
+    }
+  </style>
+</head>
+<body>
+  <h1>SD Card Manager</h1>
+  <div class="container">
+    <div id="breadcrumb"></div>
+    <button id="upButton" type="button">.. (上へ)</button>
+    <table>
+      <thead>
+        <tr><th>名前</th><th>サイズ</th><th></th></tr>
+      </thead>
+      <tbody id="fileList"></tbody>
+    </table>
+    <form id="uploadForm">
+      <input type="file" id="uploadInput" name="file">
+      <button type="submit">アップロード</button>
+    </form>
+    <div id="status"></div>
+    <div id="error"></div>
+  </div>
+</body>
+</html>

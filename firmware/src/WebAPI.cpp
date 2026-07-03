@@ -1,10 +1,14 @@
 #include <ESP32WebServer.h>
 #include <nvs.h>
+#include <ArduinoJson.h>
 #include "WebAPI.h"
 #include "Avatar.h"
 #include "llm/ChatGPT/ChatGPT.h"
 #include "llm/ChatGPT/FunctionCall.h"
 #include "Robot.h"
+#if !defined(ARDUINO_M5STACK_ATOMS3R)
+#include <SD.h>
+#endif
 
 using namespace m5avatar;
 extern Avatar avatar;
@@ -142,6 +146,10 @@ asm(\
 //IMPORT_FILE(.rodata, "index.html", index_html);
 IMPORT_FILE(.rodata, "personalize.html", personalize_html);
 IMPORT_FILE(.rodata, "personalize.js", personalize_js);
+#if !defined(ARDUINO_M5STACK_ATOMS3R)
+IMPORT_FILE(.rodata, "sdmanager.html", sdmanager_html);
+IMPORT_FILE(.rodata, "sdmanager.js", sdmanager_js);
+#endif
 
 
 void handleRoot() {
@@ -314,6 +322,159 @@ void handle_face() {
   server.send(200, "text/plain", String("OK"));
 }
 
+#if !defined(ARDUINO_M5STACK_ATOMS3R)
+// SD Card Manager
+//
+
+void handle_sdmanager_html() {
+  server.send_P(200, "text/html", (const char*)sdmanager_html, (size_t)sizeof_sdmanager_html);
+}
+
+void handle_sdmanager_js() {
+  server.send_P(200, "application/javascript", (const char*)sdmanager_js, (size_t)sizeof_sdmanager_js);
+}
+
+// dir/path が "/" 始まりで ".." を含まないことを確認する（パストラバーサル対策）
+bool isSafeSdPath(const String& path) {
+  return path.length() > 0 && path.startsWith("/") && path.indexOf("..") < 0;
+}
+
+String sdContentType(const String& path) {
+  if (path.endsWith(".html") || path.endsWith(".htm")) return "text/html";
+  if (path.endsWith(".css")) return "text/css";
+  if (path.endsWith(".js")) return "application/javascript";
+  if (path.endsWith(".json")) return "application/json";
+  if (path.endsWith(".yaml") || path.endsWith(".yml") || path.endsWith(".txt")) return "text/plain";
+  if (path.endsWith(".png")) return "image/png";
+  if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
+  if (path.endsWith(".gif")) return "image/gif";
+  if (path.endsWith(".mp3")) return "audio/mpeg";
+  if (path.endsWith(".wav")) return "audio/wav";
+  return "application/octet-stream";
+}
+
+void handle_sd_list() {
+  String dir = server.arg("dir");
+  if (dir.length() == 0) dir = "/";
+  if (!isSafeSdPath(dir)) {
+    server.send(400, "text/plain", "Invalid path");
+    return;
+  }
+  if (!SD.begin(GPIO_NUM_4, SPI, 25000000)) {
+    server.send(500, "text/plain", "SD mount failed");
+    return;
+  }
+  File root = SD.open(dir);
+  if (!root || !root.isDirectory()) {
+    if (root) root.close();
+    server.send(404, "text/plain", "Directory not found");
+    return;
+  }
+
+  JsonDocument doc;
+  JsonArray arr = doc.to<JsonArray>();
+  for (File entry = root.openNextFile(); entry; entry = root.openNextFile()) {
+    String name = entry.name();
+    int slashIdx = name.lastIndexOf('/');
+    if (slashIdx >= 0) name = name.substring(slashIdx + 1);
+    JsonObject obj = arr.add<JsonObject>();
+    obj["name"] = name;
+    obj["isDir"] = entry.isDirectory();
+    obj["size"] = entry.isDirectory() ? 0 : entry.size();
+    entry.close();
+  }
+  root.close();
+
+  String json;
+  serializeJson(doc, json);
+  server.send(200, "application/json", json);
+}
+
+void handle_sd_download() {
+  String path = server.arg("path");
+  if (!isSafeSdPath(path)) {
+    server.send(400, "text/plain", "Invalid path");
+    return;
+  }
+  if (!SD.begin(GPIO_NUM_4, SPI, 25000000)) {
+    server.send(500, "text/plain", "SD mount failed");
+    return;
+  }
+  File file = SD.open(path, FILE_READ);
+  if (!file || file.isDirectory()) {
+    if (file) file.close();
+    server.send(404, "text/plain", "File not found");
+    return;
+  }
+  server.streamFile(file, sdContentType(path));
+  file.close();
+}
+
+static File sdUploadFile;
+static bool sdUploadOk = false;
+
+// アップロードファイル名にパス区切りや ".." を含まないことを確認する（dir と結合してもディレクトリ外に書き込めないようにする）
+bool isSafeSdFilename(const String& name) {
+  return name.length() > 0 && name.indexOf('/') < 0 && name.indexOf('\\') < 0 && name.indexOf("..") < 0;
+}
+
+void handle_sd_upload_done() {
+  if (sdUploadOk) {
+    server.send(200, "text/plain", "OK");
+  } else {
+    server.send(500, "text/plain", "Upload failed");
+  }
+}
+
+void handle_sd_upload() {
+  HTTPUpload& upload = server.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    sdUploadOk = false;
+    String dir = server.arg("dir");
+    if (dir.length() == 0) dir = "/";
+    if (!isSafeSdPath(dir) || !isSafeSdFilename(upload.filename) || !SD.begin(GPIO_NUM_4, SPI, 25000000)) {
+      return;
+    }
+    if (!dir.endsWith("/")) dir += "/";
+    sdUploadFile = SD.open(dir + upload.filename, FILE_WRITE);
+    sdUploadOk = (bool)sdUploadFile;
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (sdUploadFile) {
+      size_t written = sdUploadFile.write(upload.buf, upload.currentSize);
+      if (written != upload.currentSize) {
+        sdUploadOk = false;
+      }
+    }
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (sdUploadFile) {
+      sdUploadFile.close();
+    }
+  } else if (upload.status == UPLOAD_FILE_ABORTED) {
+    sdUploadOk = false;
+    if (sdUploadFile) {
+      sdUploadFile.close();
+    }
+  }
+}
+
+void handle_sd_delete() {
+  String path = server.arg("path");
+  if (!isSafeSdPath(path)) {
+    server.send(400, "text/plain", "Invalid path");
+    return;
+  }
+  if (!SD.begin(GPIO_NUM_4, SPI, 25000000)) {
+    server.send(500, "text/plain", "SD mount failed");
+    return;
+  }
+  File f = SD.open(path);
+  bool isDir = f && f.isDirectory();
+  if (f) f.close();
+  bool ok = isDir ? SD.rmdir(path) : SD.remove(path);
+  server.send(ok ? 200 : 500, "text/plain", ok ? "Deleted" : "Delete failed");
+}
+#endif  //ARDUINO_M5STACK_ATOMS3R
+
 #if 0
 void handle_setting() {
   String value = server.arg("volume");
@@ -377,6 +538,17 @@ void init_web_server(void)
   server.on("/role_get", handle_role_get);
   server.on("/memory_get", handle_memory_get);
   server.on("/memory_clear", handle_memory_clear);
+
+#if !defined(ARDUINO_M5STACK_ATOMS3R)
+  // SD Card Manager
+  //
+  server.on("/sdmanager.html", handle_sdmanager_html);
+  server.on("/sdmanager.js", handle_sdmanager_js);
+  server.on("/sd/list", handle_sd_list);
+  server.on("/sd/download", handle_sd_download);
+  server.on("/sd/upload", HTTP_POST, handle_sd_upload_done, handle_sd_upload);
+  server.on("/sd/delete", HTTP_POST, handle_sd_delete);
+#endif
 
   // Other
   //

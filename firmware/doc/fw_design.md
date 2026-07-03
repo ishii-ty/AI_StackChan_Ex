@@ -7,6 +7,7 @@ Notes on FW design, etc.
   - [Avatar Expression](#avatar-expression)
 - [Web App](#web-app)
   - [Personalize page](#personalize-page)
+  - [SD Card Manager page](#sd-card-manager-page)
 - [Head Touch Sensor](#head-touch-sensor)
 
 
@@ -87,7 +88,25 @@ WebAPI.cpp のインラインアセンブラ(マクロ：IMPORT_FILE)で incbin�
     - 消去を実行する前に、OK/Cancelのダイアログを表示して本当に消去してよいかを確認する。
 - 画面更新時の動作
   - API /memory_get をPOSTし、記憶内容を取得してフォームに表示する。
- 
+
+### SD Card Manager page
+- 対象ボード
+  - Core2 / CoreS3（SD カード搭載機のみ）。AtomS3R は SD 非搭載のため `#if !defined(ARDUINO_M5STACK_ATOMS3R)` でビルド対象から除外する。
+- ファイル構成
+  - incbin/sdmanager.html
+  - incbin/sdmanager.js
+- 画面構成
+  - `http://<device-ip>/sdmanager.html` でディレクトリ一覧・ダウンロード・アップロード・削除ができる簡易ファイルブラウザ。
+- Web API（`src/WebAPI.cpp`）
+  - `GET /sd/list?dir=<path>`: 指定ディレクトリ配下のエントリを `[{name, isDir, size}, ...]` の JSON で返す。
+  - `GET /sd/download?path=<path>`: 指定ファイルを `streamFile()` でダウンロードさせる。
+  - `POST /sd/upload?dir=<path>`（multipart）: アップロードされたファイルを指定ディレクトリに保存する。
+  - `POST /sd/delete`（form: `path`）: ファイルまたはディレクトリを削除する。
+- 実装上の注意
+  - 受け取った `dir`/`path` は `/` 始まりかつ `..` を含まないことを検証する（`isSafeSdPath()`）。
+  - 各ハンドラは処理の先頭で毎回 `SD.begin(GPIO_NUM_4, SPI, 25000000)` を呼び、`src/llm/ChatGPT/FunctionCall.cpp` のメモ機能等が処理後に `SD.end()` している状態でも動作するようにしている。
+  - 認証は既存の Web API（role/memory 系）と同様に追加していない。LAN 内利用を前提とする。
+
 ## Head Touch Sensor
 
 `src/driver/HeadTouchSensor.*` provides the shared polling driver for the official CoreS3 head touch sensor.
