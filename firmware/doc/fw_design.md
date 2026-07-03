@@ -103,9 +103,15 @@ WebAPI.cpp のインラインアセンブラ(マクロ：IMPORT_FILE)で incbin�
   - `POST /sd/upload?dir=<path>`（multipart）: アップロードされたファイルを指定ディレクトリに保存する。
   - `POST /sd/delete`（form: `path`）: ファイルまたはディレクトリを削除する。
 - 実装上の注意
-  - 受け取った `dir`/`path` は `/` 始まりかつ `..` を含まないことを検証する（`isSafeSdPath()`）。
-  - 各ハンドラは処理の先頭で毎回 `SD.begin(GPIO_NUM_4, SPI, 25000000)` を呼び、`src/llm/ChatGPT/FunctionCall.cpp` のメモ機能等が処理後に `SD.end()` している状態でも動作するようにしている。
+  - 受け取った `dir`/`path` は `/` 始まりかつ `..` を含まないことを検証する（`isSafeSdPath()`）。アップロードファイル名も `/` `\` `..` を含まないことを検証する（`isSafeSdFilename()`）。
+  - 各ハンドラは処理の先頭で毎回 `sdBeginRetry()`（`SD.begin(GPIO_NUM_4, SPI, 25000000)` を最大3回リトライ）を呼び、`src/llm/ChatGPT/FunctionCall.cpp` のメモ機能等が処理後に `SD.end()` している状態でも動作するようにしている。
+  - アップロードは一時ファイル（`<name>.uploading`）へ書き込み、完了時に `replaceSdFile()` で本来のファイルへ置き換える。通信切断や書き込み失敗時に既存ファイルを失わないため。書き込みは `sdWriteAllRetry()` で短い書き込みをリトライする。
   - 認証は既存の Web API（role/memory 系）と同様に追加していない。LAN 内利用を前提とする。
+- 既知の課題と恒久対応案
+  - **SPI バス競合**: Core2/CoreS3 は SD カードと LCD が SPI バスを共有している（M5GFX が `_set_sd_spimode(bus_cfg.spi_host, GPIO_NUM_4)` で同一 SPI ホストを使う）。Arduino の `SD` ライブラリ（`sd_diskio`）は LGFX のバス管理と協調しないため、アバター描画タスク（`lib/m5stack-avatar/src/Avatar.cpp` の `drawLoop`）が SD I/O 中に SPI を使うと SD コマンドが破損し、`sd_diskio` の `Card Failed` / `Check status failed` エラーや、アップロードの 0 バイト化・500 エラーが発生することがある。
+  - **現状の対処（暫定）**: `sdBeginRetry()` / `sdWriteAllRetry()` によるリトライで一時的な失敗を吸収している。開発用途では実用上問題ない程度に動作するが、競合そのものは解消していないため大きめのファイル転送では不安定さが残りうる。
+  - **やってはいけない対処**: 描画タスクを `avatar.suspend()`（`vTaskSuspend`）で止める、あるいは `M5.Display.startWrite()/endWrite()` でバスをロックする方法は、いずれも別タスクから描画タスクの資源（SPI バスロック）に干渉するため、描画タスクがバスロック保持中に凍結されるとデッドロックし **HTTP が無応答になる**。実際に試して確認済みなので採用しないこと。
+  - **恒久対応案**: 描画タスクに「協調的な一時停止」の仕組みを入れる。`drawLoop` の各ループ先頭（描画前でバスロックを保持していない安全地点）で「一時停止要求」フラグを確認し、要求があれば「停止完了」を通知して待機する。Web ハンドラ側は要求を立てて停止完了を待ってから SD にアクセスし、終了後に要求を解除する。これなら描画タスクは安全地点で止まるためデッドロックも競合も起きない。`lib/m5stack-avatar/`（本リポジトリ内で編集可能）の改変を伴うため、実施時は AGENTS.md の手順に従いステアリングを作成すること。
 
 ## Head Touch Sensor
 

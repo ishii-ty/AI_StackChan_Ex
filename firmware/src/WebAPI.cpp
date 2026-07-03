@@ -339,6 +339,28 @@ bool isSafeSdPath(const String& path) {
   return path.length() > 0 && path.startsWith("/") && path.indexOf("..") < 0;
 }
 
+// SD.begin() を最大 retries 回リトライする。バス競合による一時的なマウント失敗を吸収する。
+bool sdBeginRetry(int retries = 3) {
+  for (int i = 0; i < retries; i++) {
+    if (SD.begin(GPIO_NUM_4, SPI, 25000000)) {
+      return true;
+    }
+    delay(20);
+  }
+  return false;
+}
+
+// len バイトすべてを書き込む。短い書き込みが起きたら残りをリトライする。
+bool sdWriteAllRetry(File& f, const uint8_t* buf, size_t len) {
+  size_t off = 0;
+  int retries = 3;
+  while (off < len && retries-- > 0) {
+    size_t w = f.write(buf + off, len - off);
+    off += w;
+  }
+  return off == len;
+}
+
 String sdContentType(const String& path) {
   if (path.endsWith(".html") || path.endsWith(".htm")) return "text/html";
   if (path.endsWith(".css")) return "text/css";
@@ -360,7 +382,7 @@ void handle_sd_list() {
     server.send(400, "text/plain", "Invalid path");
     return;
   }
-  if (!SD.begin(GPIO_NUM_4, SPI, 25000000)) {
+  if (!sdBeginRetry()) {
     server.send(500, "text/plain", "SD mount failed");
     return;
   }
@@ -396,7 +418,7 @@ void handle_sd_download() {
     server.send(400, "text/plain", "Invalid path");
     return;
   }
-  if (!SD.begin(GPIO_NUM_4, SPI, 25000000)) {
+  if (!sdBeginRetry()) {
     server.send(500, "text/plain", "SD mount failed");
     return;
   }
@@ -406,12 +428,19 @@ void handle_sd_download() {
     server.send(404, "text/plain", "File not found");
     return;
   }
+  String filename = path;
+  int slashIdx = filename.lastIndexOf('/');
+  if (slashIdx >= 0) filename = filename.substring(slashIdx + 1);
+  server.sendHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
   server.streamFile(file, sdContentType(path));
   file.close();
 }
 
 static File sdUploadFile;
 static bool sdUploadOk = false;
+static bool sdUploadActive = false;      // START で正常にファイルを開けたか（END/ABORTED での SD 後始末の可否）
+static String sdUploadTempPath;
+static String sdUploadFinalPath;
 
 // アップロードファイル名にパス区切りや ".." を含まないことを確認する（dir と結合してもディレクトリ外に書き込めないようにする）
 bool isSafeSdFilename(const String& name) {
@@ -426,22 +455,66 @@ void handle_sd_upload_done() {
   }
 }
 
+// 一時ファイルの内容を最終ファイルへコピーしてから一時ファイルを削除する。
+// SD.remove() の直後に SD.rename() を呼ぶと稀にリネームが失敗するため、
+// 常に成功する open/write の組み合わせだけで置き換える。
+bool replaceSdFile(const String& tempPath, const String& finalPath) {
+  File src = SD.open(tempPath, FILE_READ);
+  if (!src) {
+    return false;
+  }
+  if (SD.exists(finalPath)) {
+    SD.remove(finalPath);
+  }
+  File dst = SD.open(finalPath, FILE_WRITE);
+  if (!dst) {
+    src.close();
+    return false;
+  }
+  bool ok = true;
+  uint8_t buf[512];
+  int n;
+  while ((n = src.read(buf, sizeof(buf))) > 0) {
+    if (!sdWriteAllRetry(dst, buf, (size_t)n)) {
+      ok = false;
+      break;
+    }
+  }
+  src.close();
+  dst.close();
+  SD.remove(tempPath);
+  return ok;
+}
+
+// アップロードは START→WRITE...→END(または ABORTED) が 1 回の handleClient() 内で
+// 同期的に呼ばれる。
 void handle_sd_upload() {
   HTTPUpload& upload = server.upload();
   if (upload.status == UPLOAD_FILE_START) {
     sdUploadOk = false;
+    sdUploadActive = false;
     String dir = server.arg("dir");
     if (dir.length() == 0) dir = "/";
-    if (!isSafeSdPath(dir) || !isSafeSdFilename(upload.filename) || !SD.begin(GPIO_NUM_4, SPI, 25000000)) {
+    if (!isSafeSdPath(dir) || !isSafeSdFilename(upload.filename)) {
+      return;
+    }
+    if (!sdBeginRetry()) {
       return;
     }
     if (!dir.endsWith("/")) dir += "/";
-    sdUploadFile = SD.open(dir + upload.filename, FILE_WRITE);
+    sdUploadFinalPath = dir + upload.filename;
+    // 同名ファイルへ上書き中に失敗しても元ファイルが失われないよう、一時ファイルに書き込んでから完了時に差し替える
+    sdUploadTempPath = sdUploadFinalPath + ".uploading";
+    // 既存ファイルに直接 FILE_WRITE で上書きすると 0 バイトになることがあるため、事前に削除してから新規作成する
+    if (SD.exists(sdUploadTempPath)) {
+      SD.remove(sdUploadTempPath);
+    }
+    sdUploadFile = SD.open(sdUploadTempPath, FILE_WRITE);
     sdUploadOk = (bool)sdUploadFile;
+    sdUploadActive = sdUploadOk;
   } else if (upload.status == UPLOAD_FILE_WRITE) {
-    if (sdUploadFile) {
-      size_t written = sdUploadFile.write(upload.buf, upload.currentSize);
-      if (written != upload.currentSize) {
+    if (sdUploadActive && sdUploadFile) {
+      if (!sdWriteAllRetry(sdUploadFile, upload.buf, upload.currentSize)) {
         sdUploadOk = false;
       }
     }
@@ -449,11 +522,23 @@ void handle_sd_upload() {
     if (sdUploadFile) {
       sdUploadFile.close();
     }
+    if (sdUploadActive) {
+      if (sdUploadOk) {
+        sdUploadOk = replaceSdFile(sdUploadTempPath, sdUploadFinalPath);
+      } else {
+        SD.remove(sdUploadTempPath);
+      }
+    }
+    sdUploadActive = false;
   } else if (upload.status == UPLOAD_FILE_ABORTED) {
     sdUploadOk = false;
     if (sdUploadFile) {
       sdUploadFile.close();
     }
+    if (sdUploadActive) {
+      SD.remove(sdUploadTempPath);
+    }
+    sdUploadActive = false;
   }
 }
 
@@ -463,7 +548,7 @@ void handle_sd_delete() {
     server.send(400, "text/plain", "Invalid path");
     return;
   }
-  if (!SD.begin(GPIO_NUM_4, SPI, 25000000)) {
+  if (!sdBeginRetry()) {
     server.send(500, "text/plain", "SD mount failed");
     return;
   }
