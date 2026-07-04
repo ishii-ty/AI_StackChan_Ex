@@ -200,6 +200,9 @@ void StackchanExConfig::setExtendSettings(DynamicJsonDocument doc)
     _ex_parameters.moduleLLM.rxPin  = doc["moduleLLM"]["rxPin"].as<int>();
     _ex_parameters.moduleLLM.txPin  = doc["moduleLLM"]["txPin"].as<int>();
 
+    // web.sd_manager が無い旧設定ファイルでは as<bool>() が false を返すため、既定で無効(opt-in)になる。
+    _ex_parameters.web.sd_manager_enabled = doc["web"]["sd_manager"].as<bool>();
+
 }
 
 void StackchanExConfig::printExtParameters(void)
@@ -243,5 +246,7 @@ void StackchanExConfig::printExtParameters(void)
 
     M5_LOGI("module llm rxPin: %d", _ex_parameters.moduleLLM.rxPin);
     M5_LOGI("module llm txPin: %d", _ex_parameters.moduleLLM.txPin);
-    
+
+    M5_LOGI("web sd_manager: %s", _ex_parameters.web.sd_manager_enabled ? "true":"false");
+
 }

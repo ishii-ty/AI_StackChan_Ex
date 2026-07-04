@@ -420,7 +420,7 @@ void setup()
       delay(1000);
 
       //Webサーバ設定
-      init_web_server();
+      init_web_server(system_config.getExConfig().web.sd_manager_enabled);
       //FTPサーバ設定（SPIFFS用）
       ftpSrv.begin("stackchan","stackchan");    //username, password for ftp.  set ports in ESP8266FtpServer.h  (default 21, 50009 for PASV)
       Serial.println("FTP server started");
