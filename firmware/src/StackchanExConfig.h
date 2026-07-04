@@ -85,6 +85,10 @@ typedef struct ModuleLLMConf {
     int8_t txPin;
 } moduleLLM_s;
 
+typedef struct WebConfig {
+    bool sd_manager_enabled;  // SDカードWebファイルマネージャ(/sdmanager.html, /sd/*)を有効にするか。既定false(opt-in)。
+} web_s;
+
 typedef struct ExConfig {
     llm_s llm;
     tts_s tts;
@@ -92,6 +96,7 @@ typedef struct ExConfig {
     wakeword_s wakeword;
     audio_s audio;
     moduleLLM_s moduleLLM;
+    web_s web;
 } ex_config_s;
 
 

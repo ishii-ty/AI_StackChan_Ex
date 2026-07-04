@@ -602,7 +602,7 @@ void handle_setting() {
 #endif
 
 
-void init_web_server(void)
+void init_web_server(bool enableSdManager)
 {
   // Files
   //
@@ -626,13 +626,16 @@ void init_web_server(void)
 
 #if !defined(ARDUINO_M5STACK_ATOMS3R)
   // SD Card Manager
-  //
-  server.on("/sdmanager.html", handle_sdmanager_html);
-  server.on("/sdmanager.js", handle_sdmanager_js);
-  server.on("/sd/list", handle_sd_list);
-  server.on("/sd/download", handle_sd_download);
-  server.on("/sd/upload", HTTP_POST, handle_sd_upload_done, handle_sd_upload);
-  server.on("/sd/delete", HTTP_POST, handle_sd_delete);
+  // LAN内無認証でSDカード全体を読み書きできるため、SC_ExConfig.yamlのweb.sd_managerで
+  // 明示的に有効化した時のみルートを登録する（無効時は未登録＝404）。
+  if (enableSdManager) {
+    server.on("/sdmanager.html", handle_sdmanager_html);
+    server.on("/sdmanager.js", handle_sdmanager_js);
+    server.on("/sd/list", handle_sd_list);
+    server.on("/sd/download", handle_sd_download);
+    server.on("/sd/upload", HTTP_POST, handle_sd_upload_done, handle_sd_upload);
+    server.on("/sd/delete", HTTP_POST, handle_sd_delete);
+  }
 #endif
 
   // Other

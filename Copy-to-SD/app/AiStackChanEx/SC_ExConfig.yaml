@@ -49,3 +49,7 @@ moduleLLM:
   rxPin: 13
   txPin: 14
 
+# Web機能
+web:
+  sd_manager: false   # SDカードWebファイルマネージャ(/sdmanager.html)の有効/無効。LAN内無認証でSD全体を読み書きできるため既定は無効。開発時にtrueへ。
+

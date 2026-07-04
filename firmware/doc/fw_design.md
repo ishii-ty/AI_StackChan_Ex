@@ -92,6 +92,9 @@ WebAPI.cpp のインラインアセンブラ(マクロ：IMPORT_FILE)で incbin�
 ### SD Card Manager page
 - 対象ボード
   - Core2 / CoreS3（SD カード搭載機のみ）。AtomS3R は SD 非搭載のため `#if !defined(ARDUINO_M5STACK_ATOMS3R)` でビルド対象から除外する。
+- 有効化フラグ
+  - LAN 内無認証で SD カード全体を読み書きできるため、既定では無効（opt-in）。`SC_ExConfig.yaml` の `web.sd_manager: true` を設定した時のみルートを登録する（無効時は `/sdmanager.html` `/sd/*` とも 404）。
+  - 設定値は `StackchanExConfig::setExtendSettings()` が `web.sd_manager` を読み `ex_config_s.web.sd_manager_enabled` に格納し、`main.cpp` が `init_web_server(enableSdManager)` に渡してルート登録を分岐する。キー未記載の旧設定ファイルは `as<bool>()` が false を返すため自動的に無効。切り替えには再起動が必要。
 - ファイル構成
   - incbin/sdmanager.html
   - incbin/sdmanager.js
