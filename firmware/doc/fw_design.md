@@ -9,6 +9,7 @@ Notes on FW design, etc.
   - [Personalize page](#personalize-page)
   - [SD Card Manager page](#sd-card-manager-page)
 - [Head Touch Sensor](#head-touch-sensor)
+- [StackChan-API Integration](#stackchan-api-integration)
 
 
 ## Task
@@ -23,6 +24,7 @@ Notes on FW design, etc.
 | battery_check | Battery level check | 2048 | 1 |
 | asyncTtsStreamTask | TTS streaming play | 5 * 1024 | 2 |
 | webSocketLoopTask | WebSocket processing for LLM Realtime API | 6 * 1024 | 3 |
+| stackChanApiPoll | StackChan-API polling (network fetch only; playback runs in main loop) | 6 * 1024 | 2 |
 
 ## ESP-NOW Remote Control Mod
 
@@ -125,3 +127,22 @@ WebAPI.cpp のインラインアセンブラ(マクロ：IMPORT_FILE)で incbin�
 - `SwipeForward` and `SwipeBackward` are treated as pet gestures.
 - Each Mod keeps its own 3 second Happy expression timeout so the driver does not depend on Avatar.
 - On non-CoreS3 builds, or when Si12T is not found, the driver is a no-op and normal Mod behavior continues.
+
+## StackChan-API Integration
+
+外部サーバー `StackChan-API`（LAN内、認証なし。別リポジトリで管理）を定期ポーリングし、音声メッセージが配信されていればダウンロードして再生する機能。`src/api/StackChanApiClient.*` が責務を持つ。
+
+- 対象ボード
+  - Core2 / CoreS3 / AtomS3R すべて。ボード非依存の機能で、ビルドフラグは無い。
+- 有効化フラグ
+  - 既定では無効（opt-in）。`SC_ExConfig.yaml` の `stackchanApi.enabled: true` を設定した時のみ `stackChanApiPoll` タスクを起動する。
+  - 設定値は `StackchanExConfig::setExtendSettings()` が `stackchanApi.enabled` / `stackchanApi.baseUrl` / `stackchanApi.pollIntervalMs`（未指定時 5000ms）を読み `ex_config_s.stackchanApi` に格納する。キー未記載の旧設定ファイルは `as<bool>()` が false を返すため自動的に無効。
+- 動作
+  - `stackChanApiPoll` タスクが `pollIntervalMs` ごとに `GET {baseUrl}/api/messages/next` を実行する。ネットワークI/O（GET/JSONパース）のみを行い、音声URLは保留として保持する。再生はメインタスクの `loop()` が `mod->isBusy()` でない時に `takePendingAudioUrl()` で取り出して `playWavHttp()` を実行する（`alarmTimerCallbacked` と同じ、バックグラウンドで検知しメインタスクで消費するパターン）。これにより音声デバイスを触るのはメインタスクと mutexAudio で保護された Realtime 系タスクのみになり、タスク間の音声競合が構造的に発生しない。
+  - `playWavHttp()` は内部で `enterMutexAudio()` を取り、Realtime 系タスクのスピーカー操作と直列化する。保留が1件ある間は次のポーリングを行わない（メッセージ取りこぼし防止）。
+  - `stackchanApi.pollIntervalMs` はYAML値をそのまま使うとタイポで極端に短い値（0等）を指定した場合にポーリングタスクがタイトループしうるため、`StackchanExConfig::setExtendSettings()` で下限 1000ms にクランプする。
+  - レスポンスが `200` かつ JSON に `audio.url` が含まれる場合、`{baseUrl}{audio.url}` を保留URLとして `StackChanApiClient` 内部の Mutex 保護下に保存する（`pollTask` が直接再生することはない）。`204`（未配信メッセージなし）は無視する。
+  - 再生は `AudioGeneratorWAV` + `AudioFileSourceHTTPStream`（プレーンHTTP）を使い、`driver/PlayMP3.h` が公開する共有の `AudioOutputM5Speaker out` / `preallocateBuffer` を再利用する。これにより `lipSync` タスク（`robot->tts->getLevel()` 経由で `out` のバッファを参照）による口パクアニメーションも追加対応なしで動作する。
+- 既知の制約
+  - 認証なしの LAN 内前提（StackChan-API 側の設計に合わせている）。
+  - PUSH型（WebSocket 等）は未実装。ロングポーリング化・WebSocket化は将来の拡張候補として `doc/codex/steering/20260712-stackchan-api-polling.md` に記録している。

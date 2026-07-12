@@ -203,6 +203,20 @@ void StackchanExConfig::setExtendSettings(DynamicJsonDocument doc)
     // web.sd_manager が無い旧設定ファイルでは as<bool>() が false を返すため、既定で無効(opt-in)になる。
     _ex_parameters.web.sd_manager_enabled = doc["web"]["sd_manager"].as<bool>();
 
+    // stackchanApi が無い旧設定ファイルでは as<bool>() が false を返すため、既定で無効(opt-in)になる。
+    _ex_parameters.stackchanApi.enabled = doc["stackchanApi"]["enabled"].as<bool>();
+    _ex_parameters.stackchanApi.baseUrl = doc["stackchanApi"]["baseUrl"].as<String>();
+    {
+        uint32_t pollIntervalMs = doc["stackchanApi"]["pollIntervalMs"].is<uint32_t>()
+            ? doc["stackchanApi"]["pollIntervalMs"].as<uint32_t>()
+            : 5000;
+        // 0や極端に小さい値を設定するとポーリングタスクがタイトループしCPU/Wi-Fiを占有するため下限を設ける。
+        if(pollIntervalMs < 1000){
+            pollIntervalMs = 1000;
+        }
+        _ex_parameters.stackchanApi.pollIntervalMs = pollIntervalMs;
+    }
+
 }
 
 void StackchanExConfig::printExtParameters(void)
@@ -248,5 +262,9 @@ void StackchanExConfig::printExtParameters(void)
     M5_LOGI("module llm txPin: %d", _ex_parameters.moduleLLM.txPin);
 
     M5_LOGI("web sd_manager: %s", _ex_parameters.web.sd_manager_enabled ? "true":"false");
+
+    M5_LOGI("stackchanApi enabled: %s", _ex_parameters.stackchanApi.enabled ? "true":"false");
+    M5_LOGI("stackchanApi baseUrl: %s", _ex_parameters.stackchanApi.baseUrl.c_str());
+    M5_LOGI("stackchanApi pollIntervalMs: %u", _ex_parameters.stackchanApi.pollIntervalMs);
 
 }

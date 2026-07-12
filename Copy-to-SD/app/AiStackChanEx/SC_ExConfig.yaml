@@ -53,3 +53,9 @@ moduleLLM:
 web:
   sd_manager: false   # SDカードWebファイルマネージャ(/sdmanager.html)の有効/無効。LAN内無認証でSD全体を読み書きできるため既定は無効。開発時にtrueへ。
 
+# StackChan-API連携（外部サーバー(../StackChan-API等)の音声メッセージを定期ポーリングして再生）
+stackchanApi:
+  enabled: false        # 既定は無効(opt-in)。有効にするとbaseUrlへの定期ポーリングを開始します。
+  baseUrl: "http://192.168.X.XXX:3000"   # StackChan-APIサーバーのベースURL（末尾に/を付けない）
+  pollIntervalMs: 5000  # ポーリング間隔(ミリ秒)
+

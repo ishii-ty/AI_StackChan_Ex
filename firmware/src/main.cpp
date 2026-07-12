@@ -24,7 +24,10 @@
 #include "mod/EspNowRemote/EspNowRemoteMod.h"
 
 #include "driver/PlayMP3.h"   //lipSync
+#include "driver/PlayWav.h"
 #include "driver/TapDetect.h"
+
+#include "api/StackChanApiClient.h"
 
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
@@ -54,6 +57,7 @@
 StackchanExConfig system_config;
 Robot* robot;
 bool isOffline = false;
+static StackChanApiClient* stackChanApiClient = nullptr;
 
 
 // NTP接続情報　NTP connection information.
@@ -443,6 +447,7 @@ void setup()
   }
   
   mp3_init();
+  wav_init();
 
   //mod設定
   init_mod();
@@ -483,6 +488,11 @@ void setup()
   invokeDoubleTapDetectTask();
 #endif
 
+  if(!isOffline && system_config.getExConfig().stackchanApi.enabled){
+    stackChanApiClient = new StackChanApiClient(system_config.getExConfig().stackchanApi);
+    stackChanApiClient->begin();
+  }
+
   //init_watchdog();
 
   //ヒープメモリ残量確認(デバッグ用)
@@ -501,6 +511,15 @@ void loop()
   ModBase* mod = get_current_mod();
   mod->idle();
   //get_elapsed_time_micro("Mod idle time");
+
+  // StackChan-APIの保留音声をメインタスクで再生する。ポーリングタスクはネットワークI/Oのみを行い、
+  // 音声デバイスを触るのはメインタスク(とmutexAudioで保護されたRealtime系タスク)に限定する。
+  if(stackChanApiClient != nullptr && !mod->isBusy()){
+    String pendingAudioUrl;
+    if(stackChanApiClient->takePendingAudioUrl(pendingAudioUrl)){
+      playWavHttp(pendingAudioUrl);
+    }
+  }
 
   if (M5.BtnA.wasPressed())
   {

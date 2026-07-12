@@ -18,6 +18,7 @@ Codex などのコーディングエージェントは、変更作業の前提�
 - `src/stt`: 音声認識。
 - `src/tts`: 音声合成。
 - `src/driver`: ハードウェア、音声入出力、カメラ、Wake Word、Tap Detect など。
+- `src/api`: 外部APIサーバーとの連携（StackChan-API等のポーリング/PUSH受信）。
 - `src/share`: 共通ユーティリティ。
 - `src/WebAPI.*`: Web API と Web UI 連携。
 - `src/StackchanExConfig.*`: YAML 設定と設定構造。

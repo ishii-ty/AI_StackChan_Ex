@@ -89,6 +89,12 @@ typedef struct WebConfig {
     bool sd_manager_enabled;  // SDカードWebファイルマネージャ(/sdmanager.html, /sd/*)を有効にするか。既定false(opt-in)。
 } web_s;
 
+typedef struct StackChanApiConf {
+    bool enabled;             // StackChan-API(外部サーバー)のポーリングを有効にするか。既定false(opt-in)。
+    String baseUrl;           // StackChan-APIサーバーのベースURL。例 "http://192.168.1.50:3000"（末尾に/を付けない）。
+    uint32_t pollIntervalMs;  // ポーリング間隔(ミリ秒)。未指定時は5000。
+} stackchan_api_s;
+
 typedef struct ExConfig {
     llm_s llm;
     tts_s tts;
@@ -97,6 +103,7 @@ typedef struct ExConfig {
     audio_s audio;
     moduleLLM_s moduleLLM;
     web_s web;
+    stackchan_api_s stackchanApi;
 } ex_config_s;
 
 
