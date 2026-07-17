@@ -138,11 +138,17 @@ WebAPI.cpp のインラインアセンブラ(マクロ：IMPORT_FILE)で incbin�
   - 既定では無効（opt-in）。`SC_ExConfig.yaml` の `stackchanApi.enabled: true` を設定した時のみ `stackChanApiPoll` タスクを起動する。
   - 設定値は `StackchanExConfig::setExtendSettings()` が `stackchanApi.enabled` / `stackchanApi.baseUrl` / `stackchanApi.pollIntervalMs`（未指定時 5000ms）を読み `ex_config_s.stackchanApi` に格納する。キー未記載の旧設定ファイルは `as<bool>()` が false を返すため自動的に無効。
 - 動作
-  - `stackChanApiPoll` タスクが `pollIntervalMs` ごとに `GET {baseUrl}/api/messages/next` を実行する。ネットワークI/O（GET/JSONパース）のみを行い、音声URLは保留として保持する。再生はメインタスクの `loop()` が `mod->isBusy()` でない時に `takePendingAudioUrl()` で取り出して `playWavHttp()` を実行する（`alarmTimerCallbacked` と同じ、バックグラウンドで検知しメインタスクで消費するパターン）。これにより音声デバイスを触るのはメインタスクと mutexAudio で保護された Realtime 系タスクのみになり、タスク間の音声競合が構造的に発生しない。
-  - `playWavHttp()` は内部で `enterMutexAudio()` を取り、Realtime 系タスクのスピーカー操作と直列化する。保留が1件ある間は次のポーリングを行わない（メッセージ取りこぼし防止）。
+  - `stackChanApiPoll` タスクが `pollIntervalMs` ごとに `GET {baseUrl}/api/messages/next[?after=<id>]` を実行する。ネットワークI/O（GET/JSONパース）のみを行い、音声URLは保留として保持する。再生はメインタスクの `loop()` が `mod->isBusy()` でない時に `takePendingAudioUrl()` で取り出して `playWavHttp()` を実行する（`alarmTimerCallbacked` と同じ、バックグラウンドで検知しメインタスクで消費するパターン）。これにより音声デバイスを触るのはメインタスクと mutexAudio で保護された Realtime 系タスクのみになり、タスク間の音声競合が構造的に発生しない。
+  - `playWavHttp()` は内部で `enterMutexAudio()` を取り、Realtime 系タスクのスピーカー操作と直列化する。保留が1件ある間は次のポーリングを行わない（カーソルは受信時に進むため、保留中にGETすると保留URLを上書きして未再生のメッセージを取りこぼす）。
   - `stackchanApi.pollIntervalMs` はYAML値をそのまま使うとタイポで極端に短い値（0等）を指定した場合にポーリングタスクがタイトループしうるため、`StackchanExConfig::setExtendSettings()` で下限 1000ms にクランプする。
-  - レスポンスが `200` かつ JSON に `audio.url` が含まれる場合、`{baseUrl}{audio.url}` を保留URLとして `StackChanApiClient` 内部の Mutex 保護下に保存する（`pollTask` が直接再生することはない）。`204`（未配信メッセージなし）は無視する。
+  - **カーソル（`after`）方式**: StackChan-API サーバーは配信状態を持たない非破壊エンドポイントであり、どこまで受け取ったかは端末が保持する。`StackChanApiClient::_lastSeenId` にレスポンスの `id`（サーバー側 AUTOINCREMENT で単調増加）を保持し、次回以降 `?after=<id>` として送る。`after` を送らないとサーバーは「直近1時間以内で最古の1件」を返し続けるため、同じ音声を再生し続けることになる。
+    - カーソルは**再生の成否に関わらず受信時点で進める**。再生できないメッセージがあっても先へ進めるようにするため（同じメッセージでの無限リトライを避ける）。逆に `id` が取得できなかった場合はカーソルを進められないので**再生も行わない**。
+    - カーソルは**永続化しない（RAM保持）**。再起動すると0に戻り、初回は `after` 無しでリクエストするため、直近1時間以内（サーバー側の配信ウィンドウ）のメッセージを最古から順に再生し直してから追いつく。
+  - レスポンスが `200` かつ JSON に `audio.url` が含まれる場合、`{baseUrl}{audio.url}` を保留URLとして `StackChanApiClient` 内部の Mutex 保護下に保存する（`pollTask` が直接再生することはない）。`audio` を持たない（`text` のみの）メッセージは再生せずカーソルだけ進める（進めないと後続の音声メッセージが永久に届かない）。`204`（該当メッセージなし）は無視する。
   - 再生は `AudioGeneratorWAV` + `AudioFileSourceHTTPStream`（プレーンHTTP）を使い、`driver/PlayMP3.h` が公開する共有の `AudioOutputM5Speaker out` / `preallocateBuffer` を再利用する。これにより `lipSync` タスク（`robot->tts->getLevel()` 経由で `out` のバッファを参照）による口パクアニメーションも追加対応なしで動作する。
 - 既知の制約
   - 認証なしの LAN 内前提（StackChan-API 側の設計に合わせている）。
+  - カーソルを永続化しないため、再起動やリセットのたびに直近1時間以内のメッセージを再生し直す。
+  - レスポンスの `type` は参照せず、`audio` の有無だけで再生を判断する（実運用では `speak` のみのため）。
+  - サーバーとファームウェアは同時、またはファームウェア先行でリリースする必要がある。`after` を送らない旧ファームウェアと新サーバーの組み合わせは同じメッセージを無限に再生する。
   - PUSH型（WebSocket 等）は未実装。ロングポーリング化・WebSocket化は将来の拡張候補として `doc/codex/steering/20260712-stackchan-api-polling.md` に記録している。
