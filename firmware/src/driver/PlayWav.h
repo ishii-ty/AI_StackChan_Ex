@@ -7,6 +7,6 @@
 extern AudioGeneratorWAV *wav;
 
 extern void wav_init(void);
-extern bool playWavHttp(const String& url);
+extern bool playWavHttp(const String& url, const String& expression);
 
 #endif

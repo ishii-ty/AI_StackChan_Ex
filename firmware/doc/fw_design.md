@@ -138,7 +138,7 @@ WebAPI.cpp のインラインアセンブラ(マクロ：IMPORT_FILE)で incbin�
   - 既定では無効（opt-in）。`SC_ExConfig.yaml` の `stackchanApi.enabled: true` を設定した時のみ `stackChanApiPoll` タスクを起動する。
   - 設定値は `StackchanExConfig::setExtendSettings()` が `stackchanApi.enabled` / `stackchanApi.baseUrl` / `stackchanApi.pollIntervalMs`（未指定時 5000ms）を読み `ex_config_s.stackchanApi` に格納する。キー未記載の旧設定ファイルは `as<bool>()` が false を返すため自動的に無効。
 - 動作
-  - `stackChanApiPoll` タスクが `pollIntervalMs` ごとに `GET {baseUrl}/api/messages/next[?after=<id>]` を実行する。ネットワークI/O（GET/JSONパース）のみを行い、音声URLは保留として保持する。再生はメインタスクの `loop()` が `mod->isBusy()` でない時に `takePendingAudioUrl()` で取り出して `playWavHttp()` を実行する（`alarmTimerCallbacked` と同じ、バックグラウンドで検知しメインタスクで消費するパターン）。これにより音声デバイスを触るのはメインタスクと mutexAudio で保護された Realtime 系タスクのみになり、タスク間の音声競合が構造的に発生しない。
+  - `stackChanApiPoll` タスクが `pollIntervalMs` ごとに `GET {baseUrl}/api/messages/next[?after=<id>]` を実行する。ネットワークI/O（GET/JSONパース）のみを行い、`audioUrl`/`balloonText`/`expression` をまとめた `StackChanApiMessage` を保留として保持する。再生はメインタスクの `loop()` が `mod->isBusy()` でない時に `takePending()` で取り出して `playWavHttp()` を実行する（`alarmTimerCallbacked` と同じ、バックグラウンドで検知しメインタスクで消費するパターン）。これにより音声デバイスを触るのはメインタスクと mutexAudio で保護された Realtime 系タスクのみになり、タスク間の音声競合が構造的に発生しない。
   - `playWavHttp()` は内部で `enterMutexAudio()` を取り、Realtime 系タスクのスピーカー操作と直列化する。保留が1件ある間は次のポーリングを行わない（カーソルは受信時に進むため、保留中にGETすると保留URLを上書きして未再生のメッセージを取りこぼす）。
   - `stackchanApi.pollIntervalMs` はYAML値をそのまま使うとタイポで極端に短い値（0等）を指定した場合にポーリングタスクがタイトループしうるため、`StackchanExConfig::setExtendSettings()` で下限 1000ms にクランプする。
   - **カーソル（`after`）方式**: StackChan-API サーバーは配信状態を持たない非破壊エンドポイントであり、どこまで受け取ったかは端末が保持する。`StackChanApiClient::_lastSeenId` にレスポンスの `id`（サーバー側 AUTOINCREMENT で単調増加）を保持し、次回以降 `?after=<id>` として送る。`after` を送らないとサーバーは「直近1時間以内で最古の1件」を返し続けるため、同じ音声を再生し続けることになる。
@@ -146,6 +146,15 @@ WebAPI.cpp のインラインアセンブラ(マクロ：IMPORT_FILE)で incbin�
     - カーソルは**永続化しない（RAM保持）**。再起動すると0に戻り、初回は `after` 無しでリクエストするため、直近1時間以内（サーバー側の配信ウィンドウ）のメッセージを最古から順に再生し直してから追いつく。
   - レスポンスが `200` かつ JSON に `audio.url` が含まれる場合、`{baseUrl}{audio.url}` を保留URLとして `StackChanApiClient` 内部の Mutex 保護下に保存する（`pollTask` が直接再生することはない）。`audio` を持たない（`text` のみの）メッセージは再生せずカーソルだけ進める（進めないと後続の音声メッセージが永久に届かない）。`204`（該当メッセージなし）は無視する。
   - 再生は `AudioGeneratorWAV` + `AudioFileSourceHTTPStream`（プレーンHTTP）を使い、`driver/PlayMP3.h` が公開する共有の `AudioOutputM5Speaker out` / `preallocateBuffer` を再利用する。これにより `lipSync` タスク（`robot->tts->getLevel()` 経由で `out` のバッファを参照）による口パクアニメーションも追加対応なしで動作する。
+- 表情・吹き出しの反映（`expression`/`balloon`）
+  - サーバーは音声と一緒に `expression`（表情名の文字列）と `balloon`（吹き出し用の短文）を任意で返せる。既存の読み上げ用 `text`（最大500文字）は FW では使わない（音声はサーバー側で合成済みの WAV を再生するため）。
+  - `expression` は `src/share/ExpressionUtil.*` の `expressionFromString()` で `m5avatar::Expression` に変換する。語彙は `neutral`/`happy`/`angry`/`sad`/`doubt`/`sleepy` の6種（`src/llm/ChatGPT/FunctionCall.cpp` の `set_avatar_expression()` と同じ）。省略・未知値は `Happy` にフォールバックする。`playWavHttp(url, expression)` が再生開始時にこの表情へ、終了時に `Neutral` へ戻す（表情はステートレスで、他経路が自由に上書きしてよい）。
+  - `balloon` は `truncateUtf8()`（UTF-8コードポイント単位）で表示前に10文字へ切り詰める。吹き出しの所有権・寿命管理は `main.cpp` の3つの static 関数（`apiBalloonShow` / `apiBalloonClearIfOwned` / `apiBalloonTimerExpired`）に集約し、これら以外から `stackChanApiBalloon`（永続バッファ）や消去タイマーを直接操作しない。
+    - `apiBalloonShow()` はバッファへの再代入と `avatar.setSpeechText()` を必ずペアで行う唯一の場所（`Avatar::setSpeechText()` はポインタ保持でコピーしないため）。
+    - 所有権は `avatar.getSpeechText() == stackChanApiBalloon.c_str()`（ポインタ同一性）で判定する。他 Mod/経路が `setSpeechText()` で上書きしていれば別ポインタになるため、`apiBalloonClearIfOwned()` はそれを消さない。この判定のために `lib/m5stack-avatar/src/Avatar.h` へ `getSpeechText()` getter を追加した（private の `speechText` を返すだけ）。
+    - 再生終了後、吹き出しは10秒間表示を維持してから消える（表情は再生終了で即 `Neutral` に戻るため、寿命は表情と吹き出しで独立している）。
+    - `balloon` が空/欠落のメッセージは「吹き出しなし」を意味する。再生前に自分の旧吹き出しが残っていれば `apiBalloonClearIfOwned()` で片付けてから再生し、新しい音声と無関係な旧テキストが並走しないようにする（他経路の表示は消さない）。
+  - **受信サイズガード**: `pollOnce()` は `http.getSize()` が負値（Content-Length不明/chunked）または `MAX_RESPONSE_BYTES`（4KB）超なら `getString()` せず破棄する。ArduinoJson v7 の `JsonDocument` は伸縮式でコンストラクタの容量指定が実質無視されるため、`getString()` 前の実バイト数チェックでヒープ先食いを防ぐ。あわせて `deserializeJson()` に `DeserializationOption::Filter` を必須で使い、`id`/`expression`/`balloon`/`audio` 以外（未使用の `text` 最大500文字等）を読み込まない。`balloon` はさらにバイト長上限（64バイト）でも受信段階でガードし、超過分は破棄する（表示の10文字切り詰めとは別の入力サイズ対策）。
 - 既知の制約
   - 認証なしの LAN 内前提（StackChan-API 側の設計に合わせている）。
   - カーソルを永続化しないため、再起動やリセットのたびに直近1時間以内のメッセージを再生し直す。
