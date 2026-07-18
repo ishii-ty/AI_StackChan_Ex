@@ -209,3 +209,29 @@ FW は API 未対応でも先行検証できる（フィールド欠落＝フォ
    リセットしないこと。
 3. API 実装後の結合確認: `POST /api/messages` に `expression`/`balloon` 付きで投入し、`/next` が両フィールドを
    返すこと、実機で反映されることを確認。
+
+## 追補: Realtime経路との吹き出し競合（20260718 実機確認で判明）
+
+- **症状**: Realtime env（`REALTIME_API` 有効、`RealtimeAiMod` アクティブ）で StackChan-API の吹き出しがまったく
+  表示されず、常に "Please touch" のままだった。
+- **原因**: `webSocketLoopTask` が回す `RealtimeLLMBase::webSocketProcess()`
+  （`src/llm/RealtimeLLMBase.cpp:114-125` の else→else 分岐）が、録音でも発話でもないアイドル時に約10msごと
+  `avatar.setSpeechText("Please touch")` を呼び続けている。StackChan-API の再生は `RealtimeAiMod::isBusy()`
+  （録音/発話中のみ true）が false のアイドル時にだけ発火するため、まさにこの "Please touch" 表示と競合し、
+  メインループが出した吹き出しが次のループ（数ms後）で即座に上書きされていた。
+- **対策**: `main.cpp` に外部リンケージの `isStackChanApiBalloonActive()` を追加し、`webSocketProcess()` のアイドル
+  時分岐がこれを見て、StackChan-API 吹き出し表示中だけ `setSpeechText("Please touch")` をスキップするようにした。
+  所有権チェック（`apiBalloonClearIfOwned` 等）の仕組み自体は変更していない。
+- **判定条件の修正（初版の見落とし）**: 初版は `balloonClearAtMs != 0` を「表示中」の判定に使っていたが、
+  `balloonClearAtMs` は `playWavHttp()`（ブロッキング再生）の**後**にしかセットされない。一方 `apiBalloonShow()`
+  は再生**前**に呼ぶため、まさに吹き出しを見せたい「ブロッキング再生中」の数秒間は `balloonClearAtMs == 0` の
+  ままで抑制が効かず、並行する `webSocketLoopTask` に balloon を上書きされていた（再生後10秒間は抑制が効くが、
+  その時点で既に balloon は上書き済みで所有権を失っており復活しない）。そこで表示区間そのものを表す専用フラグ
+  `static bool apiBalloonOwning`（`apiBalloonShow` で true、`apiBalloonClearIfOwned` で false）を追加し、
+  `isStackChanApiBalloonActive()` は `apiBalloonOwning && (avatar.getSpeechText() == stackChanApiBalloon.c_str())`
+  （フラグ＋所有権のポインタ一致）で判定するよう修正した。所有権チェックを併用するのは、他経路（録音中の
+  "Listening..." 等）が balloon を上書きした場合に即座に非アクティブへ戻し、Realtime 側の表示を優先させるため。
+- **他の分岐は変更不要**: 録音中の "Listening..." ・発話中の `""` 表示は `isBusy()==true` の期間に出るため、
+  この期間は StackChan-API 再生が起きず競合しない。ユーザーが会話を始めたら Realtime 側の表示を優先してよい。
+- **対象範囲**: `RealtimeLLMBase.cpp` は `#if defined(REALTIME_API)` 配下なので、影響は Realtime env のみ。
+  非Realtime（`AiStackChanMod`）経路はそもそもこのステータス表示ループを持たないため元々競合しない。

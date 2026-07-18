@@ -509,10 +509,12 @@ void setup()
 // 所有権 = 「Avatarが保持するポインタがstackChanApiBalloon.c_str()と同一」(avatar.getSpeechText()で判定)。
 static String   stackChanApiBalloon;   // Avatarに渡す永続バッファ兼所有権基準
 static uint32_t balloonClearAtMs = 0;  // 0 = タイマー無効
+static bool apiBalloonOwning = false;  // apiBalloonShow〜apiBalloonClearIfOwnedの間true(再生中も含む)
 
 // (1) 表示: バッファ再代入とsetSpeechTextを必ずペアで行う唯一の場所。
 //     古いポインタをAvatarが見たまま再代入しないよう、この関数以外でバッファに触らない。
 static void apiBalloonShow(const String& text) {
+    apiBalloonOwning = true;
     stackChanApiBalloon = text;
     avatar.setSpeechText(stackChanApiBalloon.c_str());
 }
@@ -524,11 +526,22 @@ static void apiBalloonClearIfOwned() {
         avatar.setSpeechText("");   // ""はリテラルなのでバッファ再代入は不要
     }
     balloonClearAtMs = 0;
+    apiBalloonOwning = false;
 }
 
 // (3) 満了判定: millis()オーバーフロー対策の符号付き差分比較。
 static bool apiBalloonTimerExpired() {
     return balloonClearAtMs != 0 && (int32_t)(millis() - balloonClearAtMs) >= 0;
+}
+
+// StackChan-APIの吹き出しが表示中(apiBalloonShow〜apiBalloonClearIfOwnedの間)かを返す。Realtime経路の
+// ステータス表示(RealtimeLLMBase::webSocketProcessのアイドル時"Please touch")が毎ループsetSpeechTextで
+// 吹き出しを上書きするのを、表示中だけ抑制させるために公開する。
+// balloonClearAtMsは再生後(playWavHttpのブロッキング終了後)にしか立たず、まさに見せたい再生中の数秒間を
+// カバーできないため、専用フラグapiBalloonOwningで表示区間そのものを表す。所有権(ポインタ一致)も併用し、
+// 他経路(録音中の"Listening..."等)がballoonを上書きしたら即falseに戻ってRealtime側の表示を優先する。
+bool isStackChanApiBalloonActive() {
+    return apiBalloonOwning && (avatar.getSpeechText() == stackChanApiBalloon.c_str());
 }
 
 void loop()
