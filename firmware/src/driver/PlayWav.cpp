@@ -7,6 +7,7 @@
 #include "PlayMP3.h"
 #include "Avatar.h"
 #include "share/Mutex.h"
+#include "share/ExpressionUtil.h"
 
 using namespace m5avatar;
 
@@ -23,7 +24,9 @@ void wav_init(void)
 // StackChan-API等、LAN内のプレーンHTTPサーバーが返すWAVをダウンロードしながら再生する。
 // メインタスク(main.cppのloop())から呼ばれる想定。Realtime系タスクのMic/Speaker操作と
 // 直列化するため、playMP3()系と同様にここでenterMutexAudio()/exitMutexAudio()を行う。
-bool playWavHttp(const String& url)
+// expressionは再生中だけ表示する表情文字列("happy"等、未知/空はHappyへフォールバック)。
+// 吹き出しはここでは扱わない(所有権管理はmain.cpp側に集約するため)。
+bool playWavHttp(const String& url, const String& expression)
 {
     bool result = false;
 
@@ -33,7 +36,7 @@ bool playWavHttp(const String& url)
     if (httpStream->isOpen()) {
         AudioFileSourceBuffer *buff = new AudioFileSourceBuffer(httpStream, preallocateBuffer, preallocateBufferSize);
 
-        avatar.setExpression(Expression::Happy);
+        avatar.setExpression(expressionFromString(expression, Expression::Happy));
         servo_home = false;
 
         M5.Mic.end();

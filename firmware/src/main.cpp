@@ -6,6 +6,7 @@
 #include "share/Mutex.h"
 #include "share/SDUtil.h"
 #include "share/DefaultParams.h"
+#include "share/ExpressionUtil.h"
 #include <M5Unified.h>
 #include <nvs.h>
 #include <Avatar.h>
@@ -503,6 +504,46 @@ void setup()
 
 
 
+// StackChan-APIの吹き出し表示は次の3関数だけが状態(stackChanApiBalloon/balloonClearAtMs)に触れる。
+// 前提: avatar.setSpeechText()はコピーせずポインタ保持する(lib/m5stack-avatar/src/Avatar.cpp)。
+// 所有権 = 「Avatarが保持するポインタがstackChanApiBalloon.c_str()と同一」(avatar.getSpeechText()で判定)。
+static String   stackChanApiBalloon;   // Avatarに渡す永続バッファ兼所有権基準
+static uint32_t balloonClearAtMs = 0;  // 0 = タイマー無効
+static bool apiBalloonOwning = false;  // apiBalloonShow〜apiBalloonClearIfOwnedの間true(再生中も含む)
+
+// (1) 表示: バッファ再代入とsetSpeechTextを必ずペアで行う唯一の場所。
+//     古いポインタをAvatarが見たまま再代入しないよう、この関数以外でバッファに触らない。
+static void apiBalloonShow(const String& text) {
+    apiBalloonOwning = true;
+    stackChanApiBalloon = text;
+    avatar.setSpeechText(stackChanApiBalloon.c_str());
+}
+
+// (2) 所有権付き消去: 自分のAPI吹き出しが表示中のときだけ消す。他経路の表示は触らない。
+//     タイマーはどちらの場合も無効化する(自分の表示がもう無い以上、待つものがない)。
+static void apiBalloonClearIfOwned() {
+    if (avatar.getSpeechText() == stackChanApiBalloon.c_str()) {
+        avatar.setSpeechText("");   // ""はリテラルなのでバッファ再代入は不要
+    }
+    balloonClearAtMs = 0;
+    apiBalloonOwning = false;
+}
+
+// (3) 満了判定: millis()オーバーフロー対策の符号付き差分比較。
+static bool apiBalloonTimerExpired() {
+    return balloonClearAtMs != 0 && (int32_t)(millis() - balloonClearAtMs) >= 0;
+}
+
+// StackChan-APIの吹き出しが表示中(apiBalloonShow〜apiBalloonClearIfOwnedの間)かを返す。Realtime経路の
+// ステータス表示(RealtimeLLMBase::webSocketProcessのアイドル時"Please touch")が毎ループsetSpeechTextで
+// 吹き出しを上書きするのを、表示中だけ抑制させるために公開する。
+// balloonClearAtMsは再生後(playWavHttpのブロッキング終了後)にしか立たず、まさに見せたい再生中の数秒間を
+// カバーできないため、専用フラグapiBalloonOwningで表示区間そのものを表す。所有権(ポインタ一致)も併用し、
+// 他経路(録音中の"Listening..."等)がballoonを上書きしたら即falseに戻ってRealtime側の表示を優先する。
+bool isStackChanApiBalloonActive() {
+    return apiBalloonOwning && (avatar.getSpeechText() == stackChanApiBalloon.c_str());
+}
+
 void loop()
 {
   //get_elapsed_time_micro("loop() start");
@@ -514,11 +555,26 @@ void loop()
 
   // StackChan-APIの保留音声をメインタスクで再生する。ポーリングタスクはネットワークI/Oのみを行い、
   // 音声デバイスを触るのはメインタスク(とmutexAudioで保護されたRealtime系タスク)に限定する。
-  if(stackChanApiClient != nullptr && !mod->isBusy()){
-    String pendingAudioUrl;
-    if(stackChanApiClient->takePendingAudioUrl(pendingAudioUrl)){
-      playWavHttp(pendingAudioUrl);
-    }
+  if (stackChanApiClient != nullptr && !mod->isBusy()) {
+      StackChanApiMessage msg;
+      if (stackChanApiClient->takePending(msg)) {
+          String incoming = truncateUtf8(msg.balloonText, 10);   // ローカルに確定(永続バッファは未変更)
+          bool hasBalloon = (incoming.length() > 0);
+          if (hasBalloon) {
+              apiBalloonShow(incoming);          // 再生前に表示(音声と同期)
+          } else {
+              // このメッセージは「吹き出しなし」。自分の旧吹き出しが残っていれば片付けてから再生する
+              // (新しい音声と無関係な旧テキストを並走させない)。他経路の表示は消さない。
+              apiBalloonClearIfOwned();
+          }
+          playWavHttp(msg.audioUrl, msg.expression);   // 表情設定＋再生(ブロッキング)
+          if (hasBalloon) {
+              balloonClearAtMs = millis() + 10000;     // 再生終了後10秒
+          }
+      }
+  }
+  if (apiBalloonTimerExpired()) {
+      apiBalloonClearIfOwned();
   }
 
   if (M5.BtnA.wasPressed())

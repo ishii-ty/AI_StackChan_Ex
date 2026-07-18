@@ -20,6 +20,8 @@
 
 using namespace m5avatar;
 extern Avatar avatar;
+// StackChan-APIの吹き出し表示中はアイドル時"Please touch"表示で上書きしないための問い合わせ関数(main.cpp)。
+extern bool isStackChanApiBalloonActive();
 
 int16_t rtRecBuf[RT_REC_LENGTH];    // リアルタイム録音用メモリ
                                     // Core2だとヒープが不足するので静的な配列とした
@@ -119,7 +121,10 @@ void RealtimeLLMBase::webSocketProcess()
             delay(1);
         }
         else{
-            avatar.setSpeechText("Please touch");
+            // StackChan-APIの吹き出し表示中は上書きしない(このタスクが毎ループsetSpeechTextするため)。
+            if(!isStackChanApiBalloonActive()){
+                avatar.setSpeechText("Please touch");
+            }
             delay(10);
         }
     }
