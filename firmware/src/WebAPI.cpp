@@ -359,6 +359,13 @@ void handle_config_js() {
   server.send_P(200, "application/javascript", (const char*)config_js, (size_t)sizeof_config_js);
 }
 
+// Home のナビ表示切り替え用。SD マネージャはルート未登録時 404 のため、有効かどうかだけを返す。
+static bool s_sdManagerEnabled = false;
+
+void handle_web_features() {
+  server.send(200, "application/json", String("{\"sdManager\":") + (s_sdManagerEnabled ? "true" : "false") + "}");
+}
+
 void handle_personalize_html() {
   server.send_P(200, "text/html", (const char*)personalize_html, (size_t)sizeof_personalize_html);
 }
@@ -914,11 +921,13 @@ void init_web_server(bool enableSdManager)
   server.on("/config", HTTP_GET, handle_config_get);
   server.on("/config", HTTP_POST, handle_config_post);
   server.on("/config/restart", HTTP_POST, handle_config_restart);
+  server.on("/web/features", HTTP_GET, handle_web_features);
 
 #if !defined(ARDUINO_M5STACK_ATOMS3R)
   // SD Card Manager
   // LAN内無認証でSDカード全体を読み書きできるため、SC_ExConfig.yamlのweb.sd_managerで
   // 明示的に有効化した時のみルートを登録する（無効時は未登録＝404）。
+  s_sdManagerEnabled = enableSdManager;
   if (enableSdManager) {
     server.on("/sdmanager.html", handle_sdmanager_html);
     server.on("/sdmanager.js", handle_sdmanager_js);

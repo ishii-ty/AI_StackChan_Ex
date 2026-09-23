@@ -271,7 +271,10 @@ Web アプリの入口 `/` として `home.html` を返す。`home.html` には�
   - incbin/sdmanager.js
 - 画面構成
   - `http://<device-ip>/sdmanager.html` でディレクトリ一覧・ダウンロード・アップロード・削除ができる簡易ファイルブラウザ。
+  - 見た目は Config page と同じデザイン（`:root` の色トークン、`main` パネル、ヘッダーの Home リンク）に揃える。
+  - Home（`/`）の「SD Card Manager」リンクは既定で非表示とし、`GET /web/features` の `sdManager` が true の時だけ表示する（無効時のリンク切れ防止）。
 - Web API（`src/WebAPI.cpp`）
+  - `GET /web/features`: `{"sdManager":true|false}` を返す。`init_web_server()` に渡された `enableSdManager` を保持して返すだけで SD にはアクセスしない（AtomS3R は常に false）。ルートは有効化フラグに関係なく常に登録する。
   - `GET /sd/list?dir=<path>`: 指定ディレクトリ配下のエントリを `[{name, isDir, size}, ...]` の JSON で返す。
   - `GET /sd/download?path=<path>`: 指定ファイルを `streamFile()` でダウンロードさせる。
   - `POST /sd/upload?dir=<path>`（multipart）: アップロードされたファイルを指定ディレクトリに保存する。

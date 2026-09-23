@@ -2,121 +2,229 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>SD Card Manager</title>
+  <title>SD Card Manager - AI Stack-chan Ex</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <script src="sdmanager.js" defer></script>
+  <script src="/sdmanager.js" defer></script>
   <style>
-    html {
-      font-size: 18px;
+    :root {
+      color-scheme: light;
+      --bg: #f5f7f9;
+      --panel: #ffffff;
+      --text: #1d252c;
+      --muted: #5d6975;
+      --line: #d9e0e7;
+      --primary: #0b6f8f;
+      --danger: #b3261e;
+      --ok: #1d7f43;
+    }
+    * {
+      box-sizing: border-box;
     }
     body {
+      margin: 0;
       font-family: Arial, sans-serif;
-      margin: 2em;
-      background: #f9f9f9;
-      color: #222;
+      background: var(--bg);
+      color: var(--text);
+      padding: 20px;
+    }
+    main {
+      width: min(860px, 100%);
+      margin: 0 auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 20px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
     }
     h1 {
-      font-size: 1.5em;
-      margin-top: 0;
+      margin: 0;
+      font-size: 1.4rem;
     }
-    .container {
-      max-width: 95vw;
-      width: 100%;
-      max-width: 40em;
-      margin: auto;
-      background: #fff;
-      padding: 2em 1em;
-      border-radius: 10px;
-      box-shadow: 0 2px 8px #0001;
+    a {
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 700;
+    }
+    fieldset {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin: 0 0 16px;
+      padding: 16px;
+      min-width: 0;
+    }
+    legend {
+      padding: 0 4px;
+      font-weight: 700;
+    }
+    .path-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
     }
     #breadcrumb {
-      margin-bottom: 1em;
-      font-size: 0.95em;
+      flex: 1;
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--bg);
+      font-family: monospace;
       word-break: break-all;
-    }
-    #upButton {
-      margin-bottom: 1em;
-      padding: 0.2em 0.7em;
-      font-size: 0.85em;
-      border-radius: 4px;
-      border: 1px solid #ccc;
-      background: #eee;
-      cursor: pointer;
     }
     table {
       width: 100%;
       border-collapse: collapse;
-      margin-bottom: 1.5em;
+      table-layout: fixed;
     }
-    th, td {
+    th,
+    td {
+      padding: 8px 6px;
+      border-bottom: 1px solid var(--line);
       text-align: left;
-      padding: 0.4em 0.5em;
-      border-bottom: 1px solid #eee;
-      font-size: 0.95em;
+      vertical-align: middle;
+    }
+    th {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    th.size,
+    td.size {
+      width: 6.5em;
+      text-align: right;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    th.actions-col,
+    td.actions-col {
+      width: 8.5em;
+      text-align: right;
+      white-space: nowrap;
     }
     td.name {
-      cursor: pointer;
-      color: #0077cc;
+      word-break: break-all;
     }
-    td.size {
-      text-align: right;
-      color: #666;
-    }
-    button.action {
-      padding: 0.2em 0.7em;
-      border-radius: 4px;
-      border: none;
-      background: #bb2222;
-      color: #fff;
+    td.name.dir {
+      color: var(--primary);
+      font-weight: 700;
       cursor: pointer;
-      font-size: 0.85em;
     }
     a.download {
-      margin-right: 0.5em;
-    }
-    form#uploadForm {
-      display: flex;
-      gap: 0.5em;
-      align-items: center;
-      flex-wrap: wrap;
-      margin-bottom: 1em;
+      margin-right: 10px;
     }
     button {
-      padding: 0.2em 0.7em;
-      font-size: 0.85em;
-      border-radius: 4px;
-      border: none;
-      background: #0077cc;
-      color: #fff;
+      min-height: 44px;
+      padding: 0 16px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      font-weight: 700;
       cursor: pointer;
     }
+    button.primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+    }
+    button.action {
+      min-height: 36px;
+      padding: 0 12px;
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+    form#uploadForm {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+    }
+    input[type="file"] {
+      width: 100%;
+      min-height: 42px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      font-size: 1rem;
+    }
+    #status,
+    #error {
+      min-height: 1.4em;
+      margin-top: 14px;
+      line-height: 1.4;
+      white-space: pre-wrap;
+    }
     #status {
-      margin-top: 1em;
-      color: #007700;
+      color: var(--ok);
     }
     #error {
-      margin-top: 1em;
-      color: #bb2222;
+      color: var(--danger);
+    }
+    @media (max-width: 680px) {
+      body {
+        padding: 0;
+      }
+      main {
+        min-height: 100vh;
+        border: 0;
+        border-radius: 0;
+      }
+      header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      fieldset {
+        padding: 12px 10px;
+      }
+      th.size,
+      td.size {
+        display: none;
+      }
+      form#uploadForm {
+        grid-template-columns: 1fr;
+      }
+      form#uploadForm button {
+        width: 100%;
+      }
     }
   </style>
 </head>
 <body>
-  <h1>SD Card Manager</h1>
-  <div class="container">
-    <div id="breadcrumb"></div>
-    <button id="upButton" type="button">.. (上へ)</button>
-    <table>
-      <thead>
-        <tr><th>名前</th><th>サイズ</th><th></th></tr>
-      </thead>
-      <tbody id="fileList"></tbody>
-    </table>
-    <form id="uploadForm">
-      <input type="file" id="uploadInput" name="file">
-      <button type="submit">アップロード</button>
-    </form>
+  <main>
+    <header>
+      <h1>SD Card Manager</h1>
+      <a href="/">Home</a>
+    </header>
+    <fieldset>
+      <legend>Files</legend>
+      <div class="path-bar">
+        <div id="breadcrumb"></div>
+        <button id="upButton" type="button">.. 上へ</button>
+      </div>
+      <table>
+        <thead>
+          <tr><th>名前</th><th class="size">サイズ</th><th class="actions-col"></th></tr>
+        </thead>
+        <tbody id="fileList"></tbody>
+      </table>
+    </fieldset>
+    <fieldset>
+      <legend>Upload</legend>
+      <form id="uploadForm">
+        <input type="file" id="uploadInput" name="file">
+        <button class="primary" type="submit">アップロード</button>
+      </form>
+    </fieldset>
     <div id="status"></div>
     <div id="error"></div>
-  </div>
+  </main>
 </body>
 </html>

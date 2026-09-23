@@ -55,7 +55,7 @@ async function loadList(dir) {
       const tr = document.createElement("tr");
 
       const nameTd = document.createElement("td");
-      nameTd.className = "name";
+      nameTd.className = entry.isDir ? "name dir" : "name";
       nameTd.textContent = (entry.isDir ? "[DIR] " : "") + entry.name;
       const path = joinPath(dir, entry.name);
       if (entry.isDir) {
@@ -69,6 +69,7 @@ async function loadList(dir) {
       tr.appendChild(sizeTd);
 
       const actionTd = document.createElement("td");
+      actionTd.className = "actions-col";
       if (!entry.isDir) {
         const a = document.createElement("a");
         a.className = "download";

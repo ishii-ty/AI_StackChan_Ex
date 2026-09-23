@@ -74,16 +74,31 @@
     a:hover {
       border-color: var(--primary);
     }
+    a[hidden] {
+      display: none;
+    }
   </style>
 </head>
 <body>
   <main>
     <h1>AI Stack-chan Ex</h1>
-    <p>Open configuration or personalization.</p>
+    <p>Open configuration, personalization or SD card manager.</p>
     <nav>
       <a class="primary" href="/config.html">Config</a>
       <a href="/personalize.html">Personalize</a>
+      <a id="sdManagerLink" href="/sdmanager.html" hidden>SD Card Manager</a>
     </nav>
   </main>
+  <script>
+    // SD Card Manager is registered only when web.sd_manager is true, so show the link only then.
+    fetch("/web/features")
+      .then((res) => (res.ok ? res.json() : {}))
+      .then((features) => {
+        if (features.sdManager) {
+          document.getElementById("sdManagerLink").hidden = false;
+        }
+      })
+      .catch(() => {});
+  </script>
 </body>
 </html>
