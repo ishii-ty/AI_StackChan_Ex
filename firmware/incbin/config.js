@@ -4,6 +4,15 @@ document.addEventListener('DOMContentLoaded', function () {
   const restartButton = document.getElementById('restartButton');
   const statusDiv = document.getElementById('status');
   const errorDiv = document.getElementById('error');
+  const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
+  const mcpFields = Array.from(document.querySelectorAll('[data-mcp-server]')).map(function (server) {
+    return {
+      name: server.querySelector('[data-mcp-name]'),
+      disabled: server.querySelector('[data-mcp-disabled]'),
+      url: server.querySelector('[data-mcp-url]'),
+      port: server.querySelector('[data-mcp-port]')
+    };
+  });
 
   const fields = {
     wifiSsid: document.getElementById('wifiSsid'),
@@ -91,6 +100,40 @@ document.addEventListener('DOMContentLoaded', function () {
   };
 
   let currentServoType = fields.servoType.value;
+
+  function activateTab(tab, moveFocus) {
+    tabs.forEach(function (item) {
+      const selected = item === tab;
+      item.setAttribute('aria-selected', selected ? 'true' : 'false');
+      item.tabIndex = selected ? 0 : -1;
+      document.getElementById(item.getAttribute('aria-controls')).hidden = !selected;
+    });
+    if (moveFocus) {
+      tab.focus();
+    }
+  }
+
+  tabs.forEach(function (tab, index) {
+    tab.addEventListener('click', function () {
+      activateTab(tab, false);
+    });
+    tab.addEventListener('keydown', function (event) {
+      let nextIndex = index;
+      if (event.key === 'ArrowRight') {
+        nextIndex = (index + 1) % tabs.length;
+      } else if (event.key === 'ArrowLeft') {
+        nextIndex = (index - 1 + tabs.length) % tabs.length;
+      } else if (event.key === 'Home') {
+        nextIndex = 0;
+      } else if (event.key === 'End') {
+        nextIndex = tabs.length - 1;
+      } else {
+        return;
+      }
+      event.preventDefault();
+      activateTab(tabs[nextIndex], true);
+    });
+  });
 
   function showStatus(message) {
     statusDiv.textContent = message;
@@ -185,6 +228,16 @@ document.addEventListener('DOMContentLoaded', function () {
     fields.aiApiKey.value = apikey.aiservice || '';
     fields.aiService.value = String(llm.type === 3 ? 3 : 0);
     setBoolSelect(fields.enableMemory, !!llm.enableMemory);
+    const mcpServers = Array.isArray(llm.mcpServers) ? llm.mcpServers : [];
+    mcpFields.forEach(function (mcp, index) {
+      const server = mcpServers[index] || {};
+      mcp.name.value = server.name || '';
+      setBoolSelect(mcp.disabled, !!server.disabled);
+      mcp.url.value = server.url || '';
+      mcp.port.value = Number.isInteger(Number(server.port)) && Number(server.port) > 0
+        ? String(server.port)
+        : '';
+    });
 
     const type = basic.servo_type || 'PWM';
     fields.servoType.value = servoPresets[type] ? type : 'PWM';
@@ -212,6 +265,28 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function collectConfig() {
+    const mcpServers = [];
+    mcpFields.forEach(function (mcp, index) {
+      const name = mcp.name.value.trim();
+      const url = mcp.url.value.trim();
+      const portText = mcp.port.value.trim();
+      if (name === '' && url === '' && portText === '') {
+        return;
+      }
+      const port = Number(portText);
+      if (name === '' || url === '' || portText === '') {
+        throw new Error('MCP Server ' + (index + 1) + ': Name, URL / Host, and Port are required.');
+      }
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new Error('MCP Server ' + (index + 1) + ': Port must be an integer from 1 to 65535.');
+      }
+      mcpServers.push({
+        name: name,
+        disabled: boolSelectValue(mcp.disabled),
+        url: url,
+        port: port
+      });
+    });
     return {
       sec: {
         wifi: {
@@ -253,7 +328,8 @@ document.addEventListener('DOMContentLoaded', function () {
       ex: {
         llm: {
           type: Number(fields.aiService.value),
-          enableMemory: boolSelectValue(fields.enableMemory)
+          enableMemory: boolSelectValue(fields.enableMemory),
+          mcpServers: mcpServers
         }
       }
     };
