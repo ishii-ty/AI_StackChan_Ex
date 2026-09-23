@@ -1,5 +1,7 @@
 # AtomS3RのSPIFFSにYAMLファイルを書き込む方法
 
+> Core2 / CoreS3 を含む共通の手順と、Web UI で保存したときの動作は [設定ファイルを SPIFFS で運用する方法](spiffs_config.md) を参照してください。
+
 1. 下図のように、AI_StackChan_Ex/firmware/dataに書き込むYAMLファイルを置く。(dataフォルダがない場合は作成する。)
 ![](../images/spiffs_data_folder.png)
 

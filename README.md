@@ -53,6 +53,10 @@ LLM、STT、TTSをModule LLMのAPIに置き換えることで、AI会話機能�
 Realtime APIを利用する際は、[こちら](doc/realtime_api.md)のページに従って設定してください。
 
 
+## 設定ファイルをSPIFFSで運用する方法
+SDカードを使わずに、本体内蔵のSPIFFSに置いた設定ファイルで起動できます。[こちら](doc/spiffs_config.md)のページを参照してください。
+
+
 ## その他の機能
 ### ユーザアプリケーションの作成について
 moddable版ｽﾀｯｸﾁｬﾝ（本家と呼ばれている、ししかわさん公開の[リポジトリ](https://github.com/stack-chan/stack-chan)）のMODを参考に、ユーザアプリケーションを作成できるようにしました。

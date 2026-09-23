@@ -73,6 +73,7 @@ SmartConfig は使わず、起動時の Wi-Fi 接続元は YAML の `wifi.ssid` 
 
 - SD に設定 YAML がある場合は SD を優先する。
 - SD が無い、または主要 YAML が無い場合は SPIFFS の YAML を使う。
+  - SD を使わず SPIFFS で運用する場合は、`firmware/data/` 直下に3ファイルを置いて Upload Filesystem Image（`pio run -t uploadfs`）で書き込み、SD から設定ファイルを削除する。手順は `doc/spiffs_config.md`。
 - `SC_ExConfig.yaml`、`SC_SecConfig.yaml`、`SC_BasicConfig.yaml` の一式が揃っていない場合は通常機能を起動しない。
   - `REALTIME_API` ビルドでは、`SC_SecConfig.yaml` がある場合は Wi-Fi 接続だけ試し、成功したら STA 接続上で設定 Web を起動する。
   - `REALTIME_API` ビルドでは、Wi-Fi 接続できない場合、または `SC_SecConfig.yaml` も無い場合は Config AP を起動する。
@@ -214,13 +215,17 @@ Web アプリの入口 `/` として `home.html` を返す。`home.html` には�
   - `sec`: Wi-Fi と API key
   - `basic`: Servo 設定
   - `ex`: Realtime AI Service、Enable Memory、最大5件のMCPサーバー設定
-- `POST /config`: POST body の JSON を検証し、SPIFFS に `SC_SecConfig.yaml`、`SC_BasicConfig.yaml`、`SC_ExConfig.yaml` として保存する。
+- `POST /config`: POST body の JSON を検証し、SPIFFS 上の既存 `SC_SecConfig.yaml`、`SC_BasicConfig.yaml`、`SC_ExConfig.yaml` にマージして保存する。
 - `POST /config/restart`: 設定反映のため再起動する。
 
 #### 保存処理
 - `SC_SecConfig.yaml` は `StackchanExConfig::saveSecretConfigYaml()` が `deserializeYml()` で構文と `wifi` / `apikey` セクションを検証する。
-- `SC_BasicConfig.yaml` は Servo 関連、`takao_base`、`servo_type` のみを生成する。
-- `SC_ExConfig.yaml` は `llm.type`、`llm.enableMemory`、`llm.mcpServers` を生成する。MCPサーバーは最大5件とし、各要素に `name`、`disabled`、`url`、`port` を保存する。
+- 各 YAML は SPIFFS 上の既存ファイルを読み込み、Web UI が扱うキーだけを上書きして書き戻す（マージ保存）。Web UI 非対応のキー（`tts`、`stt`、`wakeword`、`moduleLLM`、`web`、`stackchanApi`、`llm.model`、`bluetooth`、`balloon` 等）は既存値を保持する。既存ファイルが無い、または解析できない場合は Web UI のキーだけで新規作成する。
+  - `SC_SecConfig.yaml`: `wifi.ssid`、`wifi.password`、`apikey.aiservice`、`apikey.tts`、`apikey.stt`
+  - `SC_BasicConfig.yaml`: Servo 関連（`pin`、`offset`、`center`、`lower_limit`、`upper_limit`）、`takao_base`、`servo_type`
+  - `SC_ExConfig.yaml`: `llm.type`、`llm.enableMemory`、`llm.mcpServers`。MCPサーバーは最大5件とし、配列ごと置き換える。各要素に `name`、`disabled`、`url`、`port` を保存する。
+- YAML は `WebAPI.cpp` の `json_to_yaml()` で再生成するため、元ファイルのコメントと書式は保持されない。YAMLDuino の `serializeYml()` は文字列をクォートせず `"0123"` 等が数値に化けるため使わず、スカラーは JSON 表記（文字列は二重引用符付き）で出力する。
+- 3ファイルのマージ結果をすべて作成できた場合だけ書き込みを開始する。
 - `LLM_N_MCP_SERVERS_MAX` は5とし、設定読込、Web API、MCPクライアント配列で共通の上限として使用する。YAMLに6件以上ある場合は先頭5件だけを読み込む。
 - 保存後は RAM 上の `_secret_config` も更新するが、Wi-Fi 再接続は行わず Web UI から再起動を促す。
 - Save成功時は、設定した値を有効にするため Restart 前に SD カードを抜くよう画面に表示する。

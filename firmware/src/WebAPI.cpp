@@ -103,7 +103,7 @@ bool write_text_file_atomic(fs::FS& fs, const char* path, const String& data, St
   return true;
 }
 
-bool parse_yaml_file(fs::FS& fs, const char* path, DynamicJsonDocument& doc)
+bool parse_yaml_file(fs::FS& fs, const char* path, JsonDocument& doc)
 {
   String yaml = read_text_file(fs, path);
   if(yaml.length() == 0){
@@ -112,18 +112,81 @@ bool parse_yaml_file(fs::FS& fs, const char* path, DynamicJsonDocument& doc)
   return !deserializeYml(doc, yaml.c_str());
 }
 
-String quote_yaml_string(const String& value)
+// YAMLDuino の serializeYml() は文字列をクォートせずに出力し、"0123" や "true" のような
+// 文字列が再読込時に数値/真偽値へ化けるため、スカラーは JSON 表記（YAML の上位互換）で出力する。
+void append_yaml_indent(String& out, int indent)
 {
-  String quoted = "\"";
-  for(size_t i = 0; i < value.length(); i++){
-    char c = value.charAt(i);
-    if(c == '\\' || c == '"'){
-      quoted += '\\';
-    }
-    quoted += c;
+  for(int i = 0; i < indent; i++){
+    out += ' ';
   }
-  quoted += "\"";
-  return quoted;
+}
+
+void append_yaml_scalar(String& out, JsonVariantConst value)
+{
+  if(value.isNull()){
+    out += "\"\"";
+    return;
+  }
+  String scalar;
+  serializeJson(value, scalar);
+  out += scalar;
+}
+
+void append_yaml_object(String& out, JsonObjectConst object, int indent);
+void append_yaml_array(String& out, JsonArrayConst array, int indent);
+
+// 値を "key: " や "- " の直後に続けて出力する。入れ子は改行して indent 位置から出力する。
+void append_yaml_value(String& out, JsonVariantConst value, int indent)
+{
+  if(value.is<JsonObjectConst>() && value.as<JsonObjectConst>().size() > 0){
+    out += '\n';
+    append_yaml_object(out, value.as<JsonObjectConst>(), indent);
+  }else if(value.is<JsonArrayConst>() && value.as<JsonArrayConst>().size() > 0){
+    out += '\n';
+    append_yaml_array(out, value.as<JsonArrayConst>(), indent);
+  }else if(value.is<JsonObjectConst>()){
+    out += "{}\n";
+  }else if(value.is<JsonArrayConst>()){
+    out += "[]\n";
+  }else{
+    append_yaml_scalar(out, value);
+    out += '\n';
+  }
+}
+
+void append_yaml_object(String& out, JsonObjectConst object, int indent)
+{
+  for(JsonPairConst pair : object){
+    append_yaml_indent(out, indent);
+    out += pair.key().c_str();
+    out += ": ";
+    append_yaml_value(out, pair.value(), indent + 2);
+  }
+}
+
+void append_yaml_array(String& out, JsonArrayConst array, int indent)
+{
+  for(JsonVariantConst item : array){
+    if(item.is<JsonObjectConst>() && item.as<JsonObjectConst>().size() > 0){
+      // 1つ目のキーを "- " と同じ行に置くため、indent+2 で出力した先頭の空白を "- " に置き換える。
+      String child;
+      append_yaml_object(child, item.as<JsonObjectConst>(), indent + 2);
+      append_yaml_indent(out, indent);
+      out += "- ";
+      out += child.substring(indent + 2);
+    }else{
+      append_yaml_indent(out, indent);
+      out += "- ";
+      append_yaml_value(out, item, indent + 2);
+    }
+  }
+}
+
+String json_to_yaml(JsonObjectConst root)
+{
+  String yaml;
+  append_yaml_object(yaml, root, 0);
+  return yaml;
 }
 
 String json_string_or_empty(JsonVariantConst value)
@@ -198,73 +261,88 @@ bool validate_mcp_servers(JsonObjectConst llm, String* error)
   return true;
 }
 
-String build_secret_yaml(JsonObjectConst sec)
+JsonObject get_or_create_object(JsonObject parent, const char* key)
+{
+  if(parent[key].is<JsonObject>()){
+    return parent[key].as<JsonObject>();
+  }
+  return parent[key].to<JsonObject>();
+}
+
+// SPIFFS 上の既存 YAML を読み込む。無い、または解析できない場合は空のオブジェクトから始める。
+JsonObject load_yaml_for_merge(const char* path, JsonDocument& doc)
+{
+  if(!parse_yaml_file(SPIFFS, path, doc) || !doc.is<JsonObject>()){
+    doc.clear();
+    return doc.to<JsonObject>();
+  }
+  return doc.as<JsonObject>();
+}
+
+// Web UI が扱うキーだけを上書きし、それ以外のキーは既存の値を保持する。
+void merge_secret_settings(JsonObject root, JsonObjectConst sec)
 {
   JsonObjectConst wifi = sec["wifi"];
   JsonObjectConst apikey = sec["apikey"];
-  String yaml;
-  yaml += "wifi:\n";
-  yaml += "  ssid: " + quote_yaml_string(json_string_or_empty(wifi["ssid"])) + "\n";
-  yaml += "  password: " + quote_yaml_string(json_string_or_empty(wifi["password"])) + "\n";
-  yaml += "apikey:\n";
-  yaml += "  aiservice: " + quote_yaml_string(json_string_or_empty(apikey["aiservice"])) + "\n";
-  yaml += "  tts: " + quote_yaml_string(json_string_or_empty(apikey["tts"])) + "\n";
-  yaml += "  stt: " + quote_yaml_string(json_string_or_empty(apikey["stt"])) + "\n";
-  return yaml;
+  JsonObject dst_wifi = get_or_create_object(root, "wifi");
+  dst_wifi["ssid"] = json_string_or_empty(wifi["ssid"]);
+  dst_wifi["password"] = json_string_or_empty(wifi["password"]);
+  JsonObject dst_apikey = get_or_create_object(root, "apikey");
+  dst_apikey["aiservice"] = json_string_or_empty(apikey["aiservice"]);
+  dst_apikey["tts"] = json_string_or_empty(apikey["tts"]);
+  dst_apikey["stt"] = json_string_or_empty(apikey["stt"]);
 }
 
-String build_basic_yaml(JsonObjectConst basic)
+void merge_servo_axis(JsonObject servo, JsonObjectConst src, const char* key, int default_x, int default_y)
+{
+  JsonObject axis = get_or_create_object(servo, key);
+  axis["x"] = json_int_or(src[key]["x"], default_x);
+  axis["y"] = json_int_or(src[key]["y"], default_y);
+}
+
+void merge_basic_settings(JsonObject root, JsonObjectConst basic)
 {
   JsonObjectConst servo = basic["servo"];
+  JsonObject dst_servo = get_or_create_object(root, "servo");
+  merge_servo_axis(dst_servo, servo, "pin", 33, 32);
+  merge_servo_axis(dst_servo, servo, "offset", 0, 0);
+  merge_servo_axis(dst_servo, servo, "center", 90, 90);
+  merge_servo_axis(dst_servo, servo, "lower_limit", 0, 60);
+  merge_servo_axis(dst_servo, servo, "upper_limit", 180, 90);
+  root["takao_base"] = json_bool_or(basic["takao_base"], false);
   String servo_type = json_string_or_empty(basic["servo_type"]);
-  if(servo_type.length() == 0){
-    servo_type = "PWM";
-  }
-  String yaml;
-  yaml += "servo:\n";
-  yaml += "  pin:\n";
-  yaml += "    x: " + String(json_int_or(servo["pin"]["x"], 33)) + "\n";
-  yaml += "    y: " + String(json_int_or(servo["pin"]["y"], 32)) + "\n";
-  yaml += "  offset:\n";
-  yaml += "    x: " + String(json_int_or(servo["offset"]["x"], 0)) + "\n";
-  yaml += "    y: " + String(json_int_or(servo["offset"]["y"], 0)) + "\n";
-  yaml += "  center:\n";
-  yaml += "    x: " + String(json_int_or(servo["center"]["x"], 90)) + "\n";
-  yaml += "    y: " + String(json_int_or(servo["center"]["y"], 90)) + "\n";
-  yaml += "  lower_limit:\n";
-  yaml += "    x: " + String(json_int_or(servo["lower_limit"]["x"], 0)) + "\n";
-  yaml += "    y: " + String(json_int_or(servo["lower_limit"]["y"], 60)) + "\n";
-  yaml += "  upper_limit:\n";
-  yaml += "    x: " + String(json_int_or(servo["upper_limit"]["x"], 180)) + "\n";
-  yaml += "    y: " + String(json_int_or(servo["upper_limit"]["y"], 90)) + "\n";
-  yaml += "takao_base: ";
-  yaml += json_bool_or(basic["takao_base"], false) ? "true\n" : "false\n";
-  yaml += "servo_type: " + quote_yaml_string(servo_type) + "\n";
-  return yaml;
+  root["servo_type"] = servo_type.length() > 0 ? servo_type : String("PWM");
 }
 
-String build_extend_yaml(JsonObjectConst ex)
+void merge_extend_settings(JsonObject root, JsonObjectConst ex)
 {
   JsonObjectConst llm = ex["llm"];
-  String yaml;
-  yaml += "llm:\n";
-  yaml += "  type: " + String(json_int_or(llm["type"], LLM_TYPE_CHATGPT)) + "\n";
-  yaml += "  enableMemory: ";
-  yaml += json_bool_or(llm["enableMemory"], false) ? "true\n" : "false\n";
-  JsonArrayConst servers = llm["mcpServers"].as<JsonArrayConst>();
-  if(servers.size() == 0){
-    yaml += "  mcpServers: []\n";
-  }else{
-    yaml += "  mcpServers:\n";
-    for(JsonObjectConst server : servers){
-      yaml += "    - name: " + quote_yaml_string(server["name"].as<String>()) + "\n";
-      yaml += "      disabled: ";
-      yaml += server["disabled"].as<bool>() ? "true\n" : "false\n";
-      yaml += "      url: " + quote_yaml_string(server["url"].as<String>()) + "\n";
-      yaml += "      port: " + String(server["port"].as<int>()) + "\n";
-    }
+  JsonObject dst_llm = get_or_create_object(root, "llm");
+  dst_llm["type"] = json_int_or(llm["type"], LLM_TYPE_CHATGPT);
+  dst_llm["enableMemory"] = json_bool_or(llm["enableMemory"], false);
+  // MCP サーバーは Web UI の入力が全件を表すため、配列ごと置き換える。
+  JsonArray dst_servers = dst_llm["mcpServers"].to<JsonArray>();
+  for(JsonObjectConst server : llm["mcpServers"].as<JsonArrayConst>()){
+    JsonObject dst_server = dst_servers.add<JsonObject>();
+    dst_server["name"] = server["name"].as<String>();
+    dst_server["disabled"] = server["disabled"].as<bool>();
+    dst_server["url"] = server["url"].as<String>();
+    dst_server["port"] = server["port"].as<int>();
   }
-  return yaml;
+}
+
+bool build_merged_yaml(const char* path, JsonObjectConst input,
+                       void (*merge)(JsonObject, JsonObjectConst), String* yaml, String* error)
+{
+  JsonDocument doc;
+  JsonObject root = load_yaml_for_merge(path, doc);
+  merge(root, input);
+  if(doc.overflowed()){
+    *error = String("Not enough memory to merge ") + path;
+    return false;
+  }
+  *yaml = json_to_yaml(root);
+  return true;
 }
 
 void handleRoot() {
@@ -781,9 +859,14 @@ void handle_config_post() {
     return;
   }
 
-  String sec_yaml = build_secret_yaml(request["sec"]);
-  String basic_yaml = build_basic_yaml(request["basic"]);
-  String ex_yaml = build_extend_yaml(request["ex"]);
+  // 3ファイルともマージ結果を作れた場合だけ書き込み、途中失敗で一部だけ更新されるのを避ける。
+  String sec_yaml, basic_yaml, ex_yaml;
+  if(!build_merged_yaml(SPIFFS_SEC_CONFIG_PATH, request["sec"], merge_secret_settings, &sec_yaml, &error)
+     || !build_merged_yaml(SPIFFS_BASIC_CONFIG_PATH, request["basic"], merge_basic_settings, &basic_yaml, &error)
+     || !build_merged_yaml(SPIFFS_EX_CONFIG_PATH, request["ex"], merge_extend_settings, &ex_yaml, &error)){
+    server.send(500, "text/plain", error);
+    return;
+  }
 
   if(!system_config.saveSecretConfigYaml(SPIFFS, SPIFFS_SEC_CONFIG_PATH, sec_yaml, &error)){
     server.send(400, "text/plain", error.length() > 0 ? error : String("Invalid SC_SecConfig.yaml"));
