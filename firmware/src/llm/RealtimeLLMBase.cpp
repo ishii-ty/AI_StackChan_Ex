@@ -60,10 +60,10 @@ RealtimeLLMBase::RealtimeLLMBase(llm_param_t param) :
 #endif
 
 #ifndef REALTIME_API_WITH_TTS
-  // ストリーミング音声再生用のダブルバッファを初期化
-  for(int i=0; i<2; i++){
-    audioBuf[i] = (uint8_t*)malloc(100 * 1024);
-    memset(audioBuf[i], 0, 100 * 1024);
+  // ストリーミング音声再生用のバッファを初期化
+  for(int i=0; i<RT_AUDIO_BUF_NUM; i++){
+    audioBuf[i] = (uint8_t*)malloc(RT_AUDIO_BUF_SIZE);
+    memset(audioBuf[i], 0, RT_AUDIO_BUF_SIZE);
   }
 #endif
 
@@ -132,7 +132,14 @@ void RealtimeLLMBase::webSocketProcess()
 
 int RealtimeLLMBase::getAudioLevel()
 {
-    return abs(*audioBuf[nextBufIdx ^ 1]) * 50;
+#ifndef REALTIME_API_WITH_TTS
+    // 今鳴っている面を参照する（待ちがあれば2つ前、なければ1つ前に積んだ面）
+    int back = (M5.Speaker.isPlaying(RT_AUDIO_PLAY_CHANNEL) >= 2) ? 2 : 1;
+    int idx = (nextBufIdx + RT_AUDIO_BUF_NUM - back) % RT_AUDIO_BUF_NUM;
+    return abs(*audioBuf[idx]) * 50;
+#else
+    return 0;
+#endif
 }
 
 void RealtimeLLMBase::startRealtimeRecord()
@@ -224,13 +231,32 @@ void RealtimeLLMBase::streamAudioDelta(String& delta)
 {
     int base64Size = delta.length();
     Serial.printf("audio base64 size: %d byte\n", base64Size);
+    // デコード結果（+終端1byte）がバッファに収まらないものは捨てる
+    if((base64Size / 4) * 3 + 1 > RT_AUDIO_BUF_SIZE){
+        Serial.printf("audio delta too large, skipped: %d byte\n", base64Size);
+        return;
+    }
+
+    // 待ちが空くまで待つ（鳴り終わりまでは待たない）。3面を順番に使うので、
+    // 空いた時点で次の面は再生にも待ちにも使われていない
+    while (M5.Speaker.isPlaying(RT_AUDIO_PLAY_CHANNEL) >= 2) { vTaskDelay(1); }
+
     uint8_t* buf = audioBuf[nextBufIdx];
     int len = base64_decode(delta.c_str(), base64Size, (char*)buf);
     Serial.printf("audio pcm16 size: %d byte\n", len);
 
-    while (M5.Speaker.isPlaying()) { vTaskDelay(1); }
-    M5.Speaker.playRaw((int16_t*)buf, len/2, 24000, false);
-    nextBufIdx ^= 1;  //ダブルバッファを切り替え
+    M5.Speaker.playRaw((int16_t*)buf, len/2, 24000, false, 1, RT_AUDIO_PLAY_CHANNEL, false);
+    nextBufIdx = (nextBufIdx + 1) % RT_AUDIO_BUF_NUM;
+}
+
+void RealtimeLLMBase::clearAudioBuf()
+{
+#ifndef REALTIME_API_WITH_TTS
+    for(int i=0; i<RT_AUDIO_BUF_NUM; i++){
+        memset(audioBuf[i], 0, RT_AUDIO_BUF_SIZE);
+    }
+    nextBufIdx = 0;
+#endif
 }
 
 void RealtimeLLMBase::invokeWebSocketLoopTask(void)

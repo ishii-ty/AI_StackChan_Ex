@@ -67,6 +67,15 @@ Realtime API ビルドでは、Function Calling により AI が会話中の感�
   - `systemRole_realtimeAvatarExpression` は Realtime 系 LLM の `load_role()` で `systemRole_memory` または `systemRole_noMemory` に追加する。
 
 
+### Realtime 音声のストリーミング再生
+
+`RealtimeLLMBase::streamAudioDelta()` は、Realtime 系（OpenAI Realtime / Gemini Live）共通の応答音声再生処理。
+
+- M5.Speaker のチャンネル `RT_AUDIO_PLAY_CHANNEL`（0）に固定して `playRaw()` で積む。1 チャンネルは「再生中 + 待ち」の 2 つを積めるので、`isPlaying(ch) >= 2` の間だけ待ち、鳴り終わりは待たない。鳴り終わりを待ってから次を渡すと、チャンクの境目で出力が空になり、音が途切れるため。
+- バッファは `RT_AUDIO_BUF_NUM`（3）面 × `RT_AUDIO_BUF_SIZE`（100KB）を順番に使う（再生中・待ち・次のデコード先）。デコード後のサイズが収まらない delta はログを出して捨てる。
+- 応答終了時は各クラスが全チャンネルの再生終了を待ち、`clearAudioBuf()` でバッファと書き込み位置を初期化する。
+- リップシンク（`getAudioLevel()`）は、今鳴っている面（待ちがあれば 2 つ前、なければ 1 つ前に積んだ面）の先頭を参照する。
+
 ## Wi-Fi config portal
 
 SmartConfig は使わず、起動時の Wi-Fi 接続元は YAML の `wifi.ssid` / `wifi.password` のみにする。
