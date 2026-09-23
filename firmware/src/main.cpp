@@ -239,6 +239,10 @@ void battery_check(void *args) {
   }
 }
 
+// PMF(802.11w)有効APはリセット直後の再接続を "Association refused temporarily" で一時拒否し、
+// comeback time 経過後に再アソシエーションされる。5秒では回復前にタイムアウトするため余裕を持たせる。
+static const unsigned long WIFI_CONNECT_TIMEOUT_MS = 20000;
+
 bool Wifi_connection_check() {
   unsigned long start_millis = millis();
 
@@ -246,8 +250,7 @@ bool Wifi_connection_check() {
     M5.Display.print(".");
     Serial.print(".");
     delay(1000);
-    // 5秒以上接続できなかったら抜ける
-    if ( 5000 < (millis() - start_millis) ) {
+    if ( WIFI_CONNECT_TIMEOUT_MS < (millis() - start_millis) ) {
       //break;
       return false;
     }
