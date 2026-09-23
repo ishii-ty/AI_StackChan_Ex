@@ -33,6 +33,7 @@
 #define LLM_TYPE_MODULE_LLM_FNCL        2
 #define LLM_TYPE_GEMINI                 3
 #define LLM_TYPE_CUSTOM_OPENAI          4
+#define LLM_TYPE_GPT_LIVE               5
 #define LLM_N_MCP_SERVERS_MAX           5
 
 #define TTS_TYPE_WEB_VOICEVOX           0
@@ -58,6 +59,9 @@ typedef struct LLMConf {
     bool enableMemory;
     String customEndpoint = "";  // Optional URL for LLM_TYPE_CUSTOM_OPENAI. Empty falls back to api.openai.com. http:// works without a CA; https:// requires customRootCAFile and is refused at send time if the CA is missing.
     String customRootCA = "";    // PEM bundle of the trusted root CA(s), loaded from llm.customRootCAFile (single path on SD, e.g. "/customRootCA.pem") and/or llm.customRootCAFiles (a list of paths). Multiple files are concatenated into this one buffer; mbedTLS trusts every -----BEGIN CERTIFICATE----- ... -----END CERTIFICATE----- block as a root. Only needed for https:// customEndpoint.
+    String liveModel = "";       // GPT-Live (LLM_TYPE_GPT_LIVE) model. Empty falls back to gpt-live-1. Kept separate from model so switching back to a non-realtime build does not send a live model name to ChatGPT.
+    String delegationModel = ""; // GPT-Live Responses delegation (backend) model. Empty falls back to gpt-5.6-luna.
+    String liveVoice = "";       // GPT-Live voice. Empty falls back to marin.
 } llm_s;
 
 typedef struct TTSConf {

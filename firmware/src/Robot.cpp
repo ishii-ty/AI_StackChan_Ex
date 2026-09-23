@@ -13,6 +13,7 @@
 #include "llm/ChatGPT/ChatGPT.h"
 #include "llm/ChatGPT/RealtimeChatGPT.h"
 #include "llm/Gemini/GeminiLive.h"
+#include "llm/ChatGPT/GptLive.h"
 #include "llm/ModuleLLM/ChatModuleLLM.h"
 #include "llm/ModuleLLMFncl/ChatModuleLLMFncl.h"
 #include "Avatar.h"
@@ -173,6 +174,16 @@ void Robot::initRtLLM(StackchanExConfig& config){
     break;
   case LLM_TYPE_GEMINI:
     llm = new GeminiLive(llm_param);
+    break;
+  case LLM_TYPE_GPT_LIVE:
+#if !defined(REALTIME_API_WITH_TTS)
+    llm = new GptLive(llm_param);
+#else
+    // GPT-Live は外部TTSと組み合わせる構成に対応していない。nullptrにするとRealtimeAiModが
+    // 起動直後にnull参照で落ちるため、同じOpenAIのAPIキーで動くOpenAI Realtimeにフォールバックする
+    Serial.println("Warning: GPT-Live does not support REALTIME_API_WITH_TTS. Fall back to OpenAI Realtime.");
+    llm = new RealtimeChatGPT(llm_param);
+#endif
     break;
   default:
     Serial.printf("Error: undefined LLM type %d\n", llm_type);

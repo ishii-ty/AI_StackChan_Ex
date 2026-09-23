@@ -84,7 +84,8 @@
       outline: 2px solid var(--primary);
       outline-offset: -2px;
     }
-    .tab-panel[hidden] {
+    .tab-panel[hidden],
+    .field[hidden] {
       display: none;
     }
     label {
@@ -237,6 +238,7 @@
             <select id="aiService">
               <option value="0">OpenAI Realtime</option>
               <option value="3">Google Gemini Live</option>
+              <option value="5">OpenAI GPT-Live</option>
             </select>
           </div>
           <div class="field">
@@ -252,6 +254,18 @@
               <input id="aiApiKey" type="password" autocomplete="off">
             </div>
             <button type="button" data-toggle-secret="aiApiKey">Show</button>
+          </div>
+          <div class="field" data-gpt-live hidden>
+            <label for="liveModel">Live Model</label>
+            <input id="liveModel" type="text" autocomplete="off" placeholder="gpt-live-1">
+          </div>
+          <div class="field" data-gpt-live hidden>
+            <label for="delegationModel">Delegation Model</label>
+            <input id="delegationModel" type="text" autocomplete="off" placeholder="gpt-5.6-luna">
+          </div>
+          <div class="field" data-gpt-live hidden>
+            <label for="liveVoice">Voice</label>
+            <input id="liveVoice" type="text" autocomplete="off" placeholder="marin">
           </div>
         </div>
       </fieldset>

@@ -11,11 +11,12 @@
   - [リアルタイム会話](#リアルタイム会話)
   - [サーボ動作の停止、再開](#サーボ動作の停止再開)
 - [Function Calling及びMCP](#function-calling及びmcp)
+- [OpenAI GPT-Live](#openai-gpt-live)
 - [TTSとの組み合わせ (OpenAI Realtimeのみ)](#ttsとの組み合わせ-openai-realtimeのみ)
   - [設定方法](#設定方法)
 
 ## 概要
-Realtime APIを利用することで、従来よりもリアルタイムに近い応答速度で会話を楽しむことができます。OpenAI Realtime API 及び Gemini Live APIに対応しています。  
+Realtime APIを利用することで、従来よりもリアルタイムに近い応答速度で会話を楽しむことができます。OpenAI Realtime API、OpenAI GPT-Live 及び Gemini Live APIに対応しています。  
 
 ## ビルド方法
 下図のように、VSCode(PlatformIO)のGUIで"env:m5stack-xxx-realtime"を選択してビルド＆書き込みを実行します。  
@@ -85,13 +86,13 @@ apikey:
 SDカードフォルダ：/app/AiStackChanEx  
 ファイル名：SC_ExConfig.yaml
 
-LLMとして「0:ChatGPT」または「3:Gemini」を選択します。  
+LLMとして「0:ChatGPT」、「3:Gemini」または「5:GPT-Live」を選択します。GPT-Live の設定は[OpenAI GPT-Live](#openai-gpt-live)を参照ください。  
 enableMemory=true にすると長期記憶（SPIFFSに要約を記録）が有効になります。  
 長期記憶に関する詳細は[基本的な使用方法](basic_usage.md)の 3.パーソナライズ を参照ください。
 
 ```yaml
 llm:
-  type: 0               # 0:ChatGPT  1:ModuleLLM  2:ModuleLLM(Function Calling)  3:Gemini
+  type: 0               # 0:ChatGPT  1:ModuleLLM  2:ModuleLLM(Function Calling)  3:Gemini  5:GPT-Live
   enableMemory: true    # true で長期記憶を有効化
 ```
 
@@ -118,6 +119,29 @@ M5Core画面の中央付近をタッチするとサーボによる動作の停�
 
 ## Function Calling及びMCP
 Function Callingと、Function Callingを応用して実装したMCPも使用可能です。Function Callingはデフォルトで時計、アラーム機能が有効になっており、「今何時？」や「3分のアラームをセットして」という要求に応えることができます。MCPはLinux PCでMCPサーバを起動し、YAMLで接続先MCPサーバの設定をする必要があります。詳細は[こちら](mcp.md)を参照ください。
+
+## OpenAI GPT-Live
+OpenAI の全二重音声モデル GPT-Live（`gpt-live-1`）で会話します。Web UI の AI Service で Service に「OpenAI GPT-Live」を選ぶか、SC_ExConfig.yaml で `type: 5` を指定します。APIキーは OpenAI のものを使います。
+
+```yaml
+llm:
+  type: 5
+  enableMemory: true
+  liveModel: ""          # GPT-Live のモデル。空欄なら gpt-live-1
+  delegationModel: ""    # Function Calling 等を実行する委譲先モデル。空欄なら gpt-5.6-luna
+  liveVoice: ""          # voice。空欄なら marin
+```
+
+Web UI では、Service に「OpenAI GPT-Live」を選ぶと Live Model / Delegation Model / Voice の入力欄が表示されます。
+
+OpenAI Realtime との違いは次のとおりです。
+- GPT-Live は接続時間で課金されるため（$0.05/分、秒単位）、常時接続はしません。起動後の吹き出しは"Please touch"で、画面上部をタッチすると"Connecting..."→"Listening..."となり、会話を始めます。
+- 会話は、30秒間やり取りが無いとき、または会話中に画面上部をタッチしたときに終了します。
+- ｽﾀｯｸﾁｬﾝが話している間はマイクを止めます（M5Stack はマイクとスピーカーを同時に使えないため）。そのため、話している途中で割り込むことはできません。
+- ユーザーが話している最中に GPT-Live が相槌を返した場合、相槌は再生せずに吹き出しに表示します。
+- Function Calling と MCP は、委譲先モデル（delegationModel）が実行します。委譲先モデルの利用料金は別途かかります。
+- 会話中に左右フリックで別の画面に切り替えると、会話を終了します。
+- TTS との組み合わせ（`REALTIME_API_WITH_TTS`）には対応していません。このビルドで `type: 5` を指定した場合は、OpenAI Realtime で動作します。
 
 ## TTSとの組み合わせ (OpenAI Realtimeのみ)
 VOICEVOX等（※）のTTSを組み合わせることで、お好みの声に変更することができます（ただし、応答の遅延は若干増えます）。

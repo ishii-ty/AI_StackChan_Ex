@@ -1,7 +1,7 @@
 ## アプリ固有の設定ファイル
 # AI機能 (LLM, TTS, STT, Wakeword)
 llm:
-  type: 0                            # 0:ChatGPT  1:ModuleLLM  2:ModuleLLM(Function Calling)  3:Gemini(Realtime)  4:OpenAI Compatible HTTP Endpoint
+  type: 0                            # 0:ChatGPT  1:ModuleLLM  2:ModuleLLM(Function Calling)  3:Gemini(Realtime)  4:OpenAI Compatible HTTP Endpoint  5:OpenAI GPT-Live(Realtime)
   model: ""                          # ChatGPT(type 0): 空欄なら gpt-4o、指定すればそのモデル名で上書き。OpenAI互換エンドポイント(type 4): 指定必須(空欄ならリクエストは拒否されます)。
   #model: "gpt-5.5-2026-04-23"       # 例: ChatGPT(type 0) で gpt-4o 以外を使う場合
   #model: "Gemma-4-31B-it"           # 例: OpenAI互換エンドポイント(type 4) のモデル名
@@ -21,6 +21,10 @@ llm:
   #customRootCAFiles:
   #  - "/customRootCA.pem"
   #  - "/customRootCA2.pem"
+  # OpenAI GPT-Live(type 5) 用の設定です。空欄なら括弧内の既定値を使います。Web UI の AI Service からも設定できます。
+  liveModel: ""                      # GPT-Live のモデル (gpt-live-1)
+  delegationModel: ""                # Function Calling 等を実行する委譲先モデル (gpt-5.6-luna)
+  liveVoice: ""                      # GPT-Live の voice (marin)
 
 tts:
   type: 0                            # 0:VOICEVOX  1:ElevenLabs  2:OpenAI TTS  3:AquesTalk 4:ModuleLLM

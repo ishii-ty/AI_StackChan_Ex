@@ -20,6 +20,9 @@ document.addEventListener('DOMContentLoaded', function () {
     aiService: document.getElementById('aiService'),
     enableMemory: document.getElementById('enableMemory'),
     aiApiKey: document.getElementById('aiApiKey'),
+    liveModel: document.getElementById('liveModel'),
+    delegationModel: document.getElementById('delegationModel'),
+    liveVoice: document.getElementById('liveVoice'),
     servoType: document.getElementById('servoType'),
     takaoBase: document.getElementById('takaoBase'),
     servoPinPreset: document.getElementById('servoPinPreset'),
@@ -226,7 +229,11 @@ document.addEventListener('DOMContentLoaded', function () {
     fields.wifiSsid.value = wifi.ssid || '';
     fields.wifiPassword.value = wifi.password || '';
     fields.aiApiKey.value = apikey.aiservice || '';
-    fields.aiService.value = String(llm.type === 3 ? 3 : 0);
+    fields.aiService.value = String([0, 3, 5].indexOf(llm.type) >= 0 ? llm.type : 0);
+    fields.liveModel.value = llm.liveModel || '';
+    fields.delegationModel.value = llm.delegationModel || '';
+    fields.liveVoice.value = llm.liveVoice || '';
+    updateServiceFields();
     setBoolSelect(fields.enableMemory, !!llm.enableMemory);
     const mcpServers = Array.isArray(llm.mcpServers) ? llm.mcpServers : [];
     mcpFields.forEach(function (mcp, index) {
@@ -329,6 +336,9 @@ document.addEventListener('DOMContentLoaded', function () {
         llm: {
           type: Number(fields.aiService.value),
           enableMemory: boolSelectValue(fields.enableMemory),
+          liveModel: fields.liveModel.value.trim(),
+          delegationModel: fields.delegationModel.value.trim(),
+          liveVoice: fields.liveVoice.value.trim(),
           mcpServers: mcpServers
         }
       }
@@ -358,6 +368,16 @@ document.addEventListener('DOMContentLoaded', function () {
       }
     });
   });
+
+  // GPT-Live 専用の入力欄は Service が GPT-Live のときだけ表示する（値は他の Service でも保存・保持する）。
+  function updateServiceFields() {
+    const isGptLive = fields.aiService.value === '5';
+    document.querySelectorAll('[data-gpt-live]').forEach(function (field) {
+      field.hidden = !isGptLive;
+    });
+  }
+
+  fields.aiService.addEventListener('change', updateServiceFields);
 
   fields.servoType.addEventListener('change', function () {
     const nextType = fields.servoType.value;

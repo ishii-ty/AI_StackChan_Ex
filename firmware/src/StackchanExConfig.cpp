@@ -290,6 +290,13 @@ void StackchanExConfig::setExtendSettings(DynamicJsonDocument doc)
         _ex_parameters.llm.mcpServer[i].port = doc["llm"]["mcpServers"][i]["port"].as<int>();
     }
     _ex_parameters.llm.enableMemory = doc["llm"]["enableMemory"].as<bool>();
+    // GPT-Live 専用キー。未指定時は空文字にして、既定値の解決は GptLive 側で行う。
+    _ex_parameters.llm.liveModel = doc["llm"]["liveModel"].is<const char*>()
+                                  ? doc["llm"]["liveModel"].as<String>() : String("");
+    _ex_parameters.llm.delegationModel = doc["llm"]["delegationModel"].is<const char*>()
+                                  ? doc["llm"]["delegationModel"].as<String>() : String("");
+    _ex_parameters.llm.liveVoice = doc["llm"]["liveVoice"].is<const char*>()
+                                  ? doc["llm"]["liveVoice"].as<String>() : String("");
     _ex_parameters.llm.customRootCA = "";
     // Build the trusted CA bundle from a single customRootCAFile (string) and/or a
     // customRootCAFiles list. Each PEM file is appended into one buffer; mbedTLS

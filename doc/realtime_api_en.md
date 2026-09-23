@@ -11,10 +11,11 @@
   - [Real-time conversation](#real-time-conversation)
   - [Stopping and restarting servo operation](#stopping-and-restarting-servo-operation)
 - [Function Calling and MCP](#function-calling-and-mcp)
+- [OpenAI GPT-Live](#openai-gpt-live)
 
 ## Overview
 By using Realtime API, you can enjoy conversations with response speeds closer to real time than ever before.
-Compatible with OpenAI Realtime API and Gemini Live API.
+Compatible with OpenAI Realtime API, OpenAI GPT-Live and Gemini Live API.
 
 ## How to build
 As shown below, select "env:m5stack-xxx-realtime" in the VSCode (PlatformIO) GUI, then build and upload the firmware.  
@@ -83,13 +84,13 @@ apikey:
 SD card folder：/app/AiStackChanEx  
 File name：SC_ExConfig.yaml
 
-Select "0:ChatGPT" or "3:Gemini" as the LLM.  
+Select "0:ChatGPT", "3:Gemini" or "5:GPT-Live" as the LLM. For GPT-Live settings, see [OpenAI GPT-Live](#openai-gpt-live).  
 Set enableMemory=true to enable long-term memory (recording summaries in SPIFFS).  
 For details about long-term memory, see 3. Personalization in [Basic Usage](basic_usage_en.md).
 
 ```yaml
 llm:
-  type: 0               # 0:ChatGPT  1:ModuleLLM  2:ModuleLLM(Function Calling)  3:Gemini
+  type: 0               # 0:ChatGPT  1:ModuleLLM  2:ModuleLLM(Function Calling)  3:Gemini  5:GPT-Live
   enableMemory: true    # true to enable long-term memory
 ```
 
@@ -115,3 +116,26 @@ You can stop and resume servo operation by touching near the center of the M5Cor
 
 ## Function Calling and MCP
 Function calling and MCP implemented using function calling can also be used. By default, Function Calling enables the clock and alarm functions, allowing you to respond to requests such as "What time is it now?" or "Set an alarm for three minutes". For MCP, you need to start the MCP server on a Linux PC and configure the destination MCP server with YAML. For details, see [here](mcp.md).
+
+## OpenAI GPT-Live
+Talk with OpenAI's full-duplex voice model GPT-Live (`gpt-live-1`). Select "OpenAI GPT-Live" as the Service on the AI Service tab of the Web UI, or set `type: 5` in SC_ExConfig.yaml. Use an OpenAI API key.
+
+```yaml
+llm:
+  type: 5
+  enableMemory: true
+  liveModel: ""          # GPT-Live model. Blank uses gpt-live-1
+  delegationModel: ""    # Backend model that runs Function Calling etc. Blank uses gpt-5.6-luna
+  liveVoice: ""          # Voice. Blank uses marin
+```
+
+In the Web UI, the Live Model / Delegation Model / Voice fields appear when "OpenAI GPT-Live" is selected as the Service.
+
+Differences from OpenAI Realtime:
+- GPT-Live is billed by connection time ($0.05/min, billed per second), so it does not stay connected. After startup the speech bubble shows "Please touch". Touch the top of the screen to start a conversation ("Connecting..." -> "Listening...").
+- The conversation ends after 30 seconds without interaction, or when you touch the top of the screen during a conversation.
+- The microphone is stopped while Stack-chan is speaking, because M5Stack cannot use the microphone and speaker at the same time. You cannot interrupt Stack-chan while it is speaking.
+- If GPT-Live makes a backchannel response (e.g. "uh-huh") while you are speaking, it is shown in the speech bubble instead of being played.
+- Function Calling and MCP are executed by the delegation model (delegationModel), which is billed separately.
+- Flicking left or right to switch to another screen during a conversation ends the conversation.
+- Combining with TTS (`REALTIME_API_WITH_TTS`) is not supported. If `type: 5` is specified in that build, OpenAI Realtime is used instead.

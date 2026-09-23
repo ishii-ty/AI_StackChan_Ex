@@ -320,6 +320,10 @@ void merge_extend_settings(JsonObject root, JsonObjectConst ex)
   JsonObject dst_llm = get_or_create_object(root, "llm");
   dst_llm["type"] = json_int_or(llm["type"], LLM_TYPE_CHATGPT);
   dst_llm["enableMemory"] = json_bool_or(llm["enableMemory"], false);
+  // GPT-Live 用キーは Service の選択にかかわらず保存し、切り替えても値を保持する。
+  dst_llm["liveModel"] = json_string_or_empty(llm["liveModel"]);
+  dst_llm["delegationModel"] = json_string_or_empty(llm["delegationModel"]);
+  dst_llm["liveVoice"] = json_string_or_empty(llm["liveVoice"]);
   // MCP サーバーは Web UI の入力が全件を表すため、配列ごと置き換える。
   JsonArray dst_servers = dst_llm["mcpServers"].to<JsonArray>();
   for(JsonObjectConst server : llm["mcpServers"].as<JsonArrayConst>()){
@@ -809,11 +813,17 @@ void handle_config_get() {
   JsonObject llm = ex["llm"].to<JsonObject>();
   llm["type"] = LLM_TYPE_CHATGPT;
   llm["enableMemory"] = false;
+  llm["liveModel"] = "";
+  llm["delegationModel"] = "";
+  llm["liveVoice"] = "";
   JsonArray mcp_servers = llm["mcpServers"].to<JsonArray>();
   DynamicJsonDocument ex_doc(4096);
   if(parse_yaml_file(SPIFFS, SPIFFS_EX_CONFIG_PATH, ex_doc)){
     llm["type"] = ex_doc["llm"]["type"] | LLM_TYPE_CHATGPT;
     llm["enableMemory"] = ex_doc["llm"]["enableMemory"] | false;
+    llm["liveModel"] = json_string_or_empty(ex_doc["llm"]["liveModel"]);
+    llm["delegationModel"] = json_string_or_empty(ex_doc["llm"]["delegationModel"]);
+    llm["liveVoice"] = json_string_or_empty(ex_doc["llm"]["liveVoice"]);
     JsonArrayConst stored_servers = ex_doc["llm"]["mcpServers"].as<JsonArrayConst>();
     int count = 0;
     for(JsonObjectConst stored_server : stored_servers){
@@ -829,10 +839,14 @@ void handle_config_get() {
     }
   }else{
     ex_config_s ex_config = system_config.getExConfig();
-    if(ex_config.llm.type == LLM_TYPE_CHATGPT || ex_config.llm.type == LLM_TYPE_GEMINI){
+    if(ex_config.llm.type == LLM_TYPE_CHATGPT || ex_config.llm.type == LLM_TYPE_GEMINI
+       || ex_config.llm.type == LLM_TYPE_GPT_LIVE){
       llm["type"] = ex_config.llm.type;
     }
     llm["enableMemory"] = ex_config.llm.enableMemory;
+    llm["liveModel"] = ex_config.llm.liveModel;
+    llm["delegationModel"] = ex_config.llm.delegationModel;
+    llm["liveVoice"] = ex_config.llm.liveVoice;
     for(int i = 0; i < ex_config.llm.nMcpServers && i < LLM_N_MCP_SERVERS_MAX; i++){
       JsonObject server = mcp_servers.createNestedObject();
       server["name"] = ex_config.llm.mcpServer[i].name;

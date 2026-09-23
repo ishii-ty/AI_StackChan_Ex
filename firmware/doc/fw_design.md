@@ -69,12 +69,44 @@ Realtime API ビルドでは、Function Calling により AI が会話中の感�
 
 ### Realtime 音声のストリーミング再生
 
-`RealtimeLLMBase::streamAudioDelta()` は、Realtime 系（OpenAI Realtime / Gemini Live）共通の応答音声再生処理。
+`RealtimeLLMBase::streamAudioDelta()` は、Realtime 系（OpenAI Realtime / Gemini Live / GPT-Live）共通の応答音声再生処理。
 
 - M5.Speaker のチャンネル `RT_AUDIO_PLAY_CHANNEL`（0）に固定して `playRaw()` で積む。1 チャンネルは「再生中 + 待ち」の 2 つを積めるので、`isPlaying(ch) >= 2` の間だけ待ち、鳴り終わりは待たない。鳴り終わりを待ってから次を渡すと、チャンクの境目で出力が空になり、音が途切れるため。
 - バッファは `RT_AUDIO_BUF_NUM`（3）面 × `RT_AUDIO_BUF_SIZE`（100KB）を順番に使う（再生中・待ち・次のデコード先）。デコード後のサイズが収まらない delta はログを出して捨てる。
 - 応答終了時は各クラスが全チャンネルの再生終了を待ち、`clearAudioBuf()` でバッファと書き込み位置を初期化する。
 - リップシンク（`getAudioLevel()`）は、今鳴っている面（待ちがあれば 2 つ前、なければ 1 つ前に積んだ面）の先頭を参照する。
+
+### OpenAI GPT-Live
+
+`REALTIME_API` ビルドで `llm.type: 5`（`LLM_TYPE_GPT_LIVE`）を指定すると、`src/llm/ChatGPT/GptLive.*`（`RealtimeLLMBase` 派生）が `wss://api.openai.com/v1/live/sessions` に接続する。OpenAI Realtime（type 0）と Gemini Live（type 3）の実装は変更していない。
+
+- 設定
+  - Ex YAML の `llm.liveModel`（既定 `gpt-live-1`）、`llm.delegationModel`（既定 `gpt-5.6-luna`）、`llm.liveVoice`（既定 `marin`）。空欄なら既定値を使う。
+  - 非 Realtime ビルドの ChatGPT が使う `llm.model` とは分けている。ビルドを切り替えたとき、GPT-Live のモデル名が ChatGPT に渡らないようにするため。
+- セッションのライフサイクル
+  - 接続時間で課金されるため常時接続しない。タッチで接続して `session.start` を送り、`session.started` を受けて録音を始める。
+  - `webSocket.loop()` は 1 回で受信フレームを 1 つしか処理しない。録音中の `webSocketLoopTask` は 1 周約 125ms なので、無音でも 100ms ごとに届く GPT-Live の出力に追いつかず、受信が溜まって応答が遅れていく。`onProcess()` で 1 周あたり最大 20 回・40ms まで `loop()` を追加で呼んで処理する。
+  - タッチ（メインループのタスク）では開始・終了の要求フラグを立てるだけにし、接続・切断は `webSocketLoopTask` の `onProcess()` で行う。別タスクから同じ SSL 接続に同時に書き込むと mbedTLS がエラー（-27648）になるため。
+  - 無操作が 30 秒続くか、会話中にタッチすると `session.close` を送る。`session.closed`（3 秒で打ち切り）の後に `releaseConnection()` で `LIVE_IDLE` に戻す。
+  - WebSocketsClient は切断後も `loop()` を呼ぶと自動で再接続するため、`LIVE_IDLE` の間は `isWebSocketActive()` が false を返し、`loop()` を呼ばない。
+  - GPT-Live はハンドシェイク時に API キーとヘッダを検査し、NG なら HTTP 401/403 で接続を拒否する（Realtime API は接続後にエラーを返す）。ライブラリ既定の `Origin: file://` と `Sec-WebSocket-Protocol: arduino` を付けると 403 になるため、`setExtraHeaders("")` と空の protocol で両方外す。`begin()` は認証ヘッダを初期化するので、`setAuthorization()` は `begin()` の後に呼ぶ。
+- 疑似半二重
+  - 入出力とも PCM16 16kHz（マイク録音とそろえる）。
+  - GPT-Live は話していない間も無音の出力音声（16kHz で 100ms ごと）を流し続ける。そのため出力 delta を先にデコードし、ピーク振幅（`GPT_LIVE_OUT_VOICE_LEVEL`）で声の有無を判定する。待機中の無音は捨て、無操作タイマーも延長しない。
+  - 声の入った出力を受け取ったら `session.input_audio.mute`、Mic 停止、Speaker 開始（`mutexAudio` を取得）し、`queuePcm()` で再生キューに積む。声の入った delta が 600ms 途切れたら積むのをやめ、再生が終わったら `unmute` して録音に戻る。WebSocket 版には `response.done` 相当のイベントが無いため、振幅と時間で判定する。
+  - 録音チャンクのピーク振幅（`GPT_LIVE_VAD_LEVEL`）で発話中かどうかを判定する。発話中に届き始めた出力音声のまとまりは相槌とみなして捨て、`session.output_transcript.delta` を吹き出しに表示する。
+  - 録音の開始・再開直後の 300ms（`GPT_LIVE_VAD_GUARD_MS`）は、Mic 起動時の雑音やスピーカーの残響で誤判定するため、発話判定をしない。
+  - 相槌として捨てているまとまりが 1.5 秒（`GPT_LIVE_BACKCHANNEL_MAX_MS`）を超えたら応答とみなし、そこから再生する（冒頭は欠ける）。
+- Function Calling
+  - Responses 委譲を使う。`delegation.responses.tools` に `json_Functions` と MCP ツールを入れ、`delegation.responses.instructions` に systemRole（関数の使い方の方針）を入れる。`session.instructions` は role + 委譲の方針 + userInfo。
+  - 音声モデルはツールを持たず、委譲したときだけ委譲先モデルがツールを実行する。委譲すべき場面（表情変更、タイマー、音量・明るさ、日付・時刻、ウェイクワード、Memory 有効時は記憶の更新）を `session.instructions` で伝えないと、「表情を変えて」等に口で返事をするだけで関数が呼ばれない。
+  - そのため、OpenAI Realtime のように会話の感情に合わせて自発的に表情を変える動作は、委譲が起きない限り行われない。
+  - `response.event` の内側 `response.output_item.done`（`function_call`）で `exec_calledFunc()` を実行し、`response.item.create` と `response.create` で結果を返す。
+  - `load_role()` をセッション開始ごとに呼び、`update_memory` の結果を次の会話に反映する。
+- `RealtimeLLMBase` の拡張（既定動作は従来どおり）
+  - `playSampleRate`、`startRealtimeRecord()` / `stopRealtimeRecord()` の virtual 化、`isWebSocketActive()` / `onProcess()` / `onRecordChunk()` / `isStatusTextLocked()` / `idleStatusText()` のフック。
+- Mod 切替（`RealtimeAiMod::pause()`）で `webSocketLoopTask` を止めると、無操作タイマーも `session.close` も動かずセッションが開いたままになる。`suspendWebSocketLoopTask()` はタスクを止める前に `beforeSuspend()` を呼び、GptLive は終了要求を出して `LIVE_IDLE` になるまで最大 5 秒待つ。
+- `REALTIME_API_WITH_TTS` ビルドでは使えない（`GptLive` はコンパイル対象外）。type 5 を指定すると、`llm` が `nullptr` のままだと `RealtimeAiMod` が落ちるため、OpenAI Realtime（`RealtimeChatGPT`）にフォールバックする。
 
 ## Wi-Fi config portal
 
@@ -131,6 +163,7 @@ Web アプリの入口 `/` として `home.html` を返す。`home.html` には�
     - ドロップダウン内の以下サービスから選択
       - OpenAI Realtime
       - Google Gemini Live
+      - OpenAI GPT-Live（選択時のみ Live Model / Delegation Model / Voice の入力欄を表示する）
     - API Key　(値は'*'で隠す/表示するを切り換え可能とする)
     - Enable Memory (true or false を設定)
   - MCPs (Option)
@@ -223,7 +256,7 @@ Web アプリの入口 `/` として `home.html` を返す。`home.html` には�
   - `complete`: SPIFFS に `SC_SecConfig.yaml`、`SC_BasicConfig.yaml`、`SC_ExConfig.yaml` が揃っているか
   - `sec`: Wi-Fi と API key
   - `basic`: Servo 設定
-  - `ex`: Realtime AI Service、Enable Memory、最大5件のMCPサーバー設定
+  - `ex`: Realtime AI Service、Enable Memory、GPT-Live 用キー（`liveModel` / `delegationModel` / `liveVoice`）、最大5件のMCPサーバー設定
 - `POST /config`: POST body の JSON を検証し、SPIFFS 上の既存 `SC_SecConfig.yaml`、`SC_BasicConfig.yaml`、`SC_ExConfig.yaml` にマージして保存する。
 - `POST /config/restart`: 設定反映のため再起動する。
 

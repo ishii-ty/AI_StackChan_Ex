@@ -50,6 +50,7 @@ RealtimeLLMBase::RealtimeLLMBase(llm_param_t param) :
     response_done(false),
     startTime(0),
     nextBufIdx(0),
+    playSampleRate(24000),
     outputText(String(""))
 {
 #ifdef REALTIME_API_RECORD_TEST
@@ -71,7 +72,10 @@ RealtimeLLMBase::RealtimeLLMBase(llm_param_t param) :
 
 void RealtimeLLMBase::webSocketProcess()
 {
-    webSocket.loop();
+    if(isWebSocketActive()){
+        webSocket.loop();
+    }
+    onProcess();
 
 #ifdef REALTIME_API_WITH_TTS
     if(response_done && !speaking){
@@ -101,6 +105,7 @@ void RealtimeLLMBase::webSocketProcess()
         String audioJsonBuf("");
         webSocket.sendTXT(buildInputAudioJson(audioJsonBuf, audio_base64));
 #endif
+        onRecordChunk(rtRecBuf, rtRecLength);
 
         portTickType elapsedTime = checkRealtimeRecordTimeout();
 
@@ -109,7 +114,9 @@ void RealtimeLLMBase::webSocketProcess()
         sprintf(speechTxt, "Listening:%ds", int(elapsedTime / 1000));
         avatar.setSpeechText(speechTxt);
 #else
-        avatar.setSpeechText("Listening...");
+        if(!isStatusTextLocked()){
+            avatar.setSpeechText("Listening...");
+        }
 #endif
         delay(1);
     }
@@ -123,7 +130,7 @@ void RealtimeLLMBase::webSocketProcess()
         else{
             // StackChan-APIの吹き出し表示中は上書きしない(このタスクが毎ループsetSpeechTextするため)。
             if(!isStackChanApiBalloonActive()){
-                avatar.setSpeechText("Please touch");
+                avatar.setSpeechText(idleStatusText());
             }
             delay(10);
         }
@@ -245,7 +252,7 @@ void RealtimeLLMBase::streamAudioDelta(String& delta)
     int len = base64_decode(delta.c_str(), base64Size, (char*)buf);
     Serial.printf("audio pcm16 size: %d byte\n", len);
 
-    M5.Speaker.playRaw((int16_t*)buf, len/2, 24000, false, 1, RT_AUDIO_PLAY_CHANNEL, false);
+    M5.Speaker.playRaw((int16_t*)buf, len/2, playSampleRate, false, 1, RT_AUDIO_PLAY_CHANNEL, false);
     nextBufIdx = (nextBufIdx + 1) % RT_AUDIO_BUF_NUM;
 }
 
@@ -256,6 +263,22 @@ void RealtimeLLMBase::clearAudioBuf()
         memset(audioBuf[i], 0, RT_AUDIO_BUF_SIZE);
     }
     nextBufIdx = 0;
+#endif
+}
+
+// デコード済みのPCMを再生キューに積む（streamAudioDelta()と同じ3面バッファ・固定チャンネルを使う）
+void RealtimeLLMBase::queuePcm(const uint8_t* pcm, int len)
+{
+#ifndef REALTIME_API_WITH_TTS
+    if(len <= 0 || len > RT_AUDIO_BUF_SIZE){
+        return;
+    }
+    while (M5.Speaker.isPlaying(RT_AUDIO_PLAY_CHANNEL) >= 2) { vTaskDelay(1); }
+
+    uint8_t* buf = audioBuf[nextBufIdx];
+    memcpy(buf, pcm, len);
+    M5.Speaker.playRaw((int16_t*)buf, len/2, playSampleRate, false, 1, RT_AUDIO_PLAY_CHANNEL, false);
+    nextBufIdx = (nextBufIdx + 1) % RT_AUDIO_BUF_NUM;
 #endif
 }
 
@@ -272,6 +295,7 @@ void RealtimeLLMBase::invokeWebSocketLoopTask(void)
 void RealtimeLLMBase::suspendWebSocketLoopTask(void)
 {
     if (eTaskGetState(webSocketLoopTask_h) != eSuspended) {
+      beforeSuspend();
       Serial.println("webSocketLoopTask Suspend");
       vTaskSuspend(webSocketLoopTask_h);
     }

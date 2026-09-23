@@ -58,6 +58,7 @@ public:   //本当はprivateにしたいところだがコールバック関数�
     //
     uint8_t* audioBuf[RT_AUDIO_BUF_NUM];    // Base64をデコードして得た音声データを格納するバッファ
     int nextBufIdx;          // 次回データを格納するバッファの面
+    int playSampleRate;      // 出力音声のサンプルレート。サービスごとに異なるため派生クラスで変更する
 
 public:
     RealtimeLLMBase(llm_param_t param);
@@ -70,8 +71,8 @@ public:
     void resumeWebSocketLoopTask(void);
     void webSocketProcess();
     int getAudioLevel();
-    void startRealtimeRecord();
-    void stopRealtimeRecord();
+    virtual void startRealtimeRecord();
+    virtual void stopRealtimeRecord();
     void resetRealtimeRecordStartTime();
     portTickType checkRealtimeRecordTimeout();
     bool isRealtimeRecording() {return realtime_recording;};
@@ -80,10 +81,26 @@ public:
     void hexdump(const void *mem, uint32_t len, uint8_t cols = 16);
     void streamAudioDelta(String& delta);
     void clearAudioBuf();
+    void queuePcm(const uint8_t* pcm, int len);
 
     // for TTS
     //
     String outputText;
+
+    // webSocketProcess()から呼ぶフック。既定は従来動作のまま
+    //
+    // falseの間はwebSocket.loop()を呼ばない（切断後の自動再接続を止めたい場合に使う）
+    virtual bool isWebSocketActive() { return true; };
+    // webSocket.loop()の後に毎回呼ばれる
+    virtual void onProcess() {};
+    // 録音チャンクを送信した後に呼ばれる
+    virtual void onRecordChunk(const int16_t* buf, int len) {};
+    // trueの間は録音中の"Listening..."表示で吹き出しを上書きしない
+    virtual bool isStatusTextLocked() { return false; };
+    // 録音も発話もしていない時の吹き出し表示
+    virtual const char* idleStatusText() { return "Please touch"; };
+    // suspendWebSocketLoopTask()でタスクを止める直前に、呼び出し元のタスクから呼ばれる
+    virtual void beforeSuspend() {};
 
 };
 
