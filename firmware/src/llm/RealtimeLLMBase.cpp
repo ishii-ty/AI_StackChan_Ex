@@ -23,9 +23,6 @@ extern Avatar avatar;
 // StackChan-APIの吹き出し表示中はアイドル時"Please touch"表示で上書きしないための問い合わせ関数(main.cpp)。
 extern bool isStackChanApiBalloonActive();
 
-int16_t rtRecBuf[RT_REC_LENGTH];    // リアルタイム録音用メモリ
-                                    // Core2だとヒープが不足するので静的な配列とした
-
 TaskHandle_t webSocketLoopTask_h = NULL;
 
 // WebSocketのイベント処理(webSocket.loop())及び、録音データ（約0.1秒）を
@@ -44,6 +41,8 @@ void webSocketLoopTask(void *arg) {
 RealtimeLLMBase::RealtimeLLMBase(llm_param_t param) : 
     LLMBase(param, 0),
     msgDoc(0),
+    rtRecIdx(0),
+    rtRecChunkCnt(0),
     rtRecSamplerate(RT_REC_SAMPLE_RATE),
     rtRecLength(RT_REC_LENGTH),
     realtime_recording(false),
@@ -53,11 +52,19 @@ RealtimeLLMBase::RealtimeLLMBase(llm_param_t param) :
     playSampleRate(24000),
     outputText(String(""))
 {
+  // リアルタイム録音用のバッファ。Core2だと内部ヒープが不足するのでPSRAMから確保する
+  // （mic_taskはI2SのDMAバッファからCPUでコピーするため、書き込み先がPSRAMでもよい）
+  for(int i=0; i<RT_REC_BUF_NUM; i++){
+    rtRecBuf[i] = (int16_t*)heap_caps_malloc(RT_REC_LENGTH_MAX * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    memset(rtRecBuf[i], 0, RT_REC_LENGTH_MAX * sizeof(int16_t));
+  }
+
 #ifdef REALTIME_API_RECORD_TEST
   // リアルタイム録音のチャンクデータを蓄積してテスト再生するためのバッファ（約4s）
-  recTestLenMax = rtRecLength * 40;
+  // 24kHzで録音する派生クラスもあるため、最大長で確保する
+  recTestLenMax = RT_REC_LENGTH_MAX * 40;
   recTestLenCnt = 0;
-  recTestBuf = (int16_t*)heap_caps_malloc(recTestLenMax * sizeof(*rtRecBuf), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  recTestBuf = (int16_t*)heap_caps_malloc(recTestLenMax * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 #endif
 
 #ifndef REALTIME_API_WITH_TTS
@@ -85,27 +92,41 @@ void RealtimeLLMBase::webSocketProcess()
 #endif
 
     if(realtime_recording){
+        // record()は予約を登録するだけで録音の完了を待たない（予約は2つまで）。
+        // 戻った時点で2つ前に予約した面の録音は完了しているので、その面を送る
+        int16_t* recBuf = rtRecBuf[rtRecIdx];
+        int16_t* doneBuf = rtRecBuf[(rtRecIdx + RT_REC_BUF_NUM - 2) % RT_REC_BUF_NUM];
+        bool recorded;
         enterMutexAudio();
         //M5.Mic.begin();
-        if(!M5.Mic.record(rtRecBuf, rtRecLength, rtRecSamplerate)){
+        recorded = M5.Mic.record(recBuf, rtRecLength, rtRecSamplerate);
+        //M5.Mic.end();
+        exitMutexAudio();
+        if(!recorded){
             Serial.println("Mic.record() returns false");
             delay(1000);
         }
-        //M5.Mic.end();
-        exitMutexAudio();
-        String audio_base64;
-        audio_base64 = base64::encode((u8*)rtRecBuf, rtRecLength * sizeof(int16_t));
+        else{
+            rtRecIdx = (rtRecIdx + 1) % RT_REC_BUF_NUM;
+            rtRecChunkCnt++;
+        }
+
+        // 録音開始直後のチャンクは前回の録音の残りなので送らない
+        if(recorded && rtRecChunkCnt > RT_REC_SKIP_CHUNKS){
+            String audio_base64;
+            audio_base64 = base64::encode((u8*)doneBuf, rtRecLength * sizeof(int16_t));
 
 #ifdef REALTIME_API_RECORD_TEST
-        if((recTestLenCnt + rtRecLength) < recTestLenMax){
-            memcpy((u8*)&recTestBuf[recTestLenCnt], (u8*)rtRecBuf, rtRecLength * sizeof(int16_t));
-            recTestLenCnt += rtRecLength;
-        }
+            if((recTestLenCnt + rtRecLength) < recTestLenMax){
+                memcpy((u8*)&recTestBuf[recTestLenCnt], (u8*)doneBuf, rtRecLength * sizeof(int16_t));
+                recTestLenCnt += rtRecLength;
+            }
 #else
-        String audioJsonBuf("");
-        webSocket.sendTXT(buildInputAudioJson(audioJsonBuf, audio_base64));
+            String audioJsonBuf("");
+            webSocket.sendTXT(buildInputAudioJson(audioJsonBuf, audio_base64));
 #endif
-        onRecordChunk(rtRecBuf, rtRecLength);
+            onRecordChunk(doneBuf, rtRecLength);
+        }
 
         portTickType elapsedTime = checkRealtimeRecordTimeout();
 
@@ -153,6 +174,7 @@ void RealtimeLLMBase::startRealtimeRecord()
 {
     if(!realtime_recording){
         Serial.println("Start realtime recording");
+        rtRecChunkCnt = 0;
         realtime_recording = true;
         startTime = xTaskGetTickCount();
     }

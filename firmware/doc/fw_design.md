@@ -76,6 +76,15 @@ Realtime API ビルドでは、Function Calling により AI が会話中の感�
 - 応答終了時は各クラスが全チャンネルの再生終了を待ち、`clearAudioBuf()` でバッファと書き込み位置を初期化する。
 - リップシンク（`getAudioLevel()`）は、今鳴っている面（待ちがあれば 2 つ前、なければ 1 つ前に積んだ面）の先頭を参照する。
 
+### Realtime 音声の録音と送信
+
+`RealtimeLLMBase::webSocketProcess()` は、録音中は約 125ms ごとに録音チャンクを WebSocket で送信する（Realtime 系共通）。
+
+- M5.Mic の `record()` は録音の予約を登録するだけで、録音の完了は待たない（予約は 2 つまで、空くまで待つ）。そのため録音バッファは `RT_REC_BUF_NUM`（3）面を順番に使い、`record(buf[k])` が返った時点で録音が完了している `buf[k-2]` を送信・`onRecordChunk()` に渡す。1 面だと、送信中のバッファを次の録音が上書きする。
+- 録音開始直後の `RT_REC_SKIP_CHUNKS`（2）チャンクは、予約がすぐ返り前回の録音の残りが入っているため送らない。`M5.Mic.end()` しても予約は残り `begin()` 後に続きが録音されるため、面の番号（`rtRecIdx`）はリセットしない。
+- バッファは PSRAM に `RT_REC_LENGTH_MAX`（3000 サンプル）× 3 面を確保する。
+- 録音レートと 1 チャンクの長さ（`rtRecSamplerate` / `rtRecLength`）は派生クラスで変更する。既定は 16kHz・2000 サンプル。OpenAI Realtime は入力 `audio/pcm` が 24kHz のみ対応のため、24kHz・3000 サンプルで録音する。
+
 ### OpenAI GPT-Live
 
 `REALTIME_API` ビルドで `llm.type: 5`（`LLM_TYPE_GPT_LIVE`）を指定すると、`src/llm/ChatGPT/GptLive.*`（`RealtimeLLMBase` 派生）が `wss://api.openai.com/v1/live/sessions` に接続する。OpenAI Realtime（type 0）と Gemini Live（type 3）の実装は変更していない。

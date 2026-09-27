@@ -16,6 +16,11 @@
 #define GEMINI_PROMPT_MAX_SIZE   (1024*50)
 
 #define RT_REC_LENGTH       (2000)      //0.125s 
+// 録音バッファ。M5.Micは録音の予約を2つまで持てて、record()は予約を登録するだけで録音の完了を待たない。
+// 予約中の2面に加えて送信中の1面が要るため3面を順番に使う（record(buf[k])が返った時点でbuf[k-2]は録音完了）
+#define RT_REC_BUF_NUM      (3)
+#define RT_REC_LENGTH_MAX   (3000)      //1面の最大サンプル数（OpenAI Realtimeの24kHz×0.125s）
+#define RT_REC_SKIP_CHUNKS  (2)         //録音開始直後に送らずに捨てるチャンク数（前回の録音の残りのため）
 
 // ストリーミング再生用バッファ。M5.Speakerの1チャンネルは「再生中+待ち」の2つを積めるため、
 // 次のデコード先を加えた3面を順番に使う（2面だと鳴り終わりを待つ必要があり、チャンクの境目で音が途切れる）
@@ -41,9 +46,11 @@ public:   //本当はprivateにしたいところだがコールバック関数�
 
     // for record
     //
-    //int16_t* rtRecBuf;
-    int rtRecSamplerate;
-    int rtRecLength;
+    int16_t* rtRecBuf[RT_REC_BUF_NUM];  // 録音バッファ（PSRAM）
+    int rtRecIdx;            // 次に録音を予約する面。予約との対応を崩さないためリセットしない
+    int rtRecChunkCnt;       // 録音開始後に予約したチャンク数
+    int rtRecSamplerate;     // 録音のサンプルレート。サービスごとに異なるため派生クラスで変更する
+    int rtRecLength;         // 1チャンクのサンプル数（RT_REC_LENGTH_MAX以下）
     bool realtime_recording;
     bool response_done;
     portTickType startTime;
