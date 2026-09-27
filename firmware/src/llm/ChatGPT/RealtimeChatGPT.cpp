@@ -286,6 +286,10 @@ RealtimeChatGPT::RealtimeChatGPT(llm_param_t param)
 {
   p_this = this;    //コールバック関数に静的変数経由でthisポインタを渡す
   msgDoc = SpiRamJsonDocument(1024*150);
+
+  // OpenAI Realtimeの入力音声(audio/pcm)は24kHzのみ対応（session.updateの宣言と合わせる）
+  rtRecSamplerate = 24000;
+  rtRecLength = 3000;     //0.125s
   
   initMcpClientList(mcpClient, param.llm_conf.mcpServer, param.llm_conf.nMcpServers);
   fnCall = new FunctionCall(param, this, mcpClient);
